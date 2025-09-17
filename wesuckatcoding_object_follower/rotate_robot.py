@@ -39,7 +39,7 @@ class RotateRobot(Node):
     def publish_twist(self):
         twist = Twist()
         twist.linear.x = 0.0
-        twist.angular.z = self.k * self.x_value
+        twist.angular.z = - self.k * self.x_value
         self.publisher.publish(twist)
 
 def main(args=None):
@@ -54,4 +54,5 @@ def main(args=None):
         rclpy.shutdown()
 
 if __name__ == '__main__':
+
     main()
