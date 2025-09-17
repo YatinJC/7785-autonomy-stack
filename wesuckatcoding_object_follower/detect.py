@@ -24,11 +24,12 @@ class ColorDetectionNode(Node):
         self.current_frame = None
         self.current_hsv = None
         self.selected_pixel = None  # Store selected pixel coordinates
-        
+        self.image_width = None
+
         # Publishers
         self.coord_publisher = self.create_publisher(
-            Point2D, 
-            '/coordinate', 
+            Float32,
+            'x_val/float',
             10
         )
         self.masked_publisher = self.create_publisher(
@@ -161,7 +162,7 @@ class ColorDetectionNode(Node):
                 return
             
             self.current_frame = frame
-            
+            self.image_width = frame.shape[1]
             # Convert to HSV
             self.current_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
             
@@ -192,7 +193,10 @@ class ColorDetectionNode(Node):
                         coord_msg = Point2D()
                         coord_msg.x = float(cx)
                         coord_msg.y = float(cy)
-                        self.coord_publisher.publish(coord_msg)
+                        if self.image_width is not None:
+                            norm_x = Float32()
+                            norm_x.data = (2*coord_msg.x/self.image_width) - 1
+                            self.coord_publisher.publish(norm_x)
                         
                         self.get_logger().debug(f'Published center coordinate: ({cx}, {cy})')
                 
