@@ -22,7 +22,8 @@ setup(
         'console_scripts': [
             'rotate_robot = wesuckatcoding_object_follower.rotate_robot:main',
             'detector = wesuckatcoding_object_follower.detect:main',
-            'viewer = wesuckatcoding_object_follower.viewer:main'
+            'viewer = wesuckatcoding_object_follower.viewer:main',
+            'img_sub = wesuckatcoding_object_follower.img_sub:main'
         ],
     },
 )
