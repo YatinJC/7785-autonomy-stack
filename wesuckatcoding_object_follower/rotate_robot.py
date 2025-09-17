@@ -51,7 +51,7 @@ def main(args=None):
         node.get_logger().info("RotateRobot stopped cleanly (Ctrl+C).")
         twist = Twist()
         twist.linear.x = 0.0
-        twist.angular.z = - self.k * self.x_value
+        twist.angular.z = 0.0
         self.publisher.publish(twist)
     finally:
         node.destroy_node()
@@ -60,4 +60,5 @@ def main(args=None):
 if __name__ == '__main__':
 
     main()
+
 
