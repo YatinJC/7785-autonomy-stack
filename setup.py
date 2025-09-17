@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'WESUCKATCODING_object_follower'
+package_name = 'wesuckatcoding_object_follower'
 
 setup(
     name=package_name,
@@ -20,9 +20,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'rotate_robot = WESUCKATCODING_object_follower.rotate_robot:main',
-            'detector = WESUCKATCODING_object_follower.detect:main',
-            'viewer = WESUCKATCODING_object_follower.viewer:main'
+            'rotate_robot = wesuckatcoding_object_follower.rotate_robot:main',
+            'detector = wesuckatcoding_object_follower.detect:main',
+            'viewer = wesuckatcoding_object_follower.viewer:main'
         ],
     },
 )
