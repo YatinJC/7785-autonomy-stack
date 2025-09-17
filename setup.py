@@ -21,7 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'rotate_robot = WESUCKATCODING_object_follower.rotate_robot:main'
-            'dectector = WESUCKATCODING_object_follower.dectect:main'
+            'detector = WESUCKATCODING_object_follower.detect:main'
             'viewer = WESUCKATCODING_object_follower.viewer:main'
         ],
     },
