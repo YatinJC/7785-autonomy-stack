@@ -1,0 +1,15 @@
+package.xml
+setup.cfg
+setup.py
+resource/wesuckatcoding_object_follower
+wesuckatcoding_object_follower/__init__.py
+wesuckatcoding_object_follower/detect.py
+wesuckatcoding_object_follower/rotate_robot.py
+wesuckatcoding_object_follower/viewer.py
+wesuckatcoding_object_follower.egg-info/PKG-INFO
+wesuckatcoding_object_follower.egg-info/SOURCES.txt
+wesuckatcoding_object_follower.egg-info/dependency_links.txt
+wesuckatcoding_object_follower.egg-info/entry_points.txt
+wesuckatcoding_object_follower.egg-info/requires.txt
+wesuckatcoding_object_follower.egg-info/top_level.txt
+wesuckatcoding_object_follower.egg-info/zip-safe

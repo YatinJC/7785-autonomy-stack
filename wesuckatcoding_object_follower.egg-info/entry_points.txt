@@ -1,0 +1,4 @@
+[console_scripts]
+detector = wesuckatcoding_object_follower.detect:main
+rotate_robot = wesuckatcoding_object_follower.rotate_robot:main
+viewer = wesuckatcoding_object_follower.viewer:main
