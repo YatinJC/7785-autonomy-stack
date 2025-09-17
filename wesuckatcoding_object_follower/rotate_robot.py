@@ -49,6 +49,10 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         node.get_logger().info("RotateRobot stopped cleanly (Ctrl+C).")
+        twist = Twist()
+        twist.linear.x = 0.0
+        twist.angular.z = - self.k * self.x_value
+        self.publisher.publish(twist)
     finally:
         node.destroy_node()
         rclpy.shutdown()
@@ -56,3 +60,4 @@ def main(args=None):
 if __name__ == '__main__':
 
     main()
+
