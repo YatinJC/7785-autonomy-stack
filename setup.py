@@ -1,3 +1,5 @@
+# Yatin Chandar and Arun Showry Busani
+
 from setuptools import find_packages, setup
 
 package_name = 'wesuckatcoding_object_follower'
