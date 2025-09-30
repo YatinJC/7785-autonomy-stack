@@ -38,6 +38,11 @@ class ColorDetectionNode(Node):
             '/masked/compressed',
             10
         )
+        self.size_publisher = self.create_publisher(
+            Float32,
+            '/obj_width/Float32',
+            10
+        )
 
         # Subscribers
         self.image_subscriber = self.create_subscription(
@@ -183,7 +188,7 @@ class ColorDetectionNode(Node):
                 # If contours found, find the largest one and publish its center
                 if len(contours) > 0:
                     largest_contour = max(contours, key=cv2.contourArea)
-
+                    approx_width = cv2.boundingRect(largest_contour)[2]
                     # Calculate centroid of largest contour
                     M = cv2.moments(largest_contour)
                     if M["m00"] != 0:
@@ -195,6 +200,7 @@ class ColorDetectionNode(Node):
                             norm_x = Float32()
                             norm_x.data = (2*cx/self.image_width) - 1
                             self.coord_publisher.publish(norm_x)
+                            self.size_publisher.publish(Float32(data=approx_width/self.image_width))
 
                         self.get_logger().debug(f'Published center coordinate: ({cx}, {cy})')
 
