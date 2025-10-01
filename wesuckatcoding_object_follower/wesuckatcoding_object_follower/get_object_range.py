@@ -5,7 +5,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Float32
 import numpy as np
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
 from custom_msgs.msg import Track
 
@@ -14,7 +14,6 @@ class get_object_range(Node):
         super().__init__("get_object_range")
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
-            history=HistoryPolicy.UNKNOWN,
             durability=DurabilityPolicy.VOLATILE,
             depth=10
         )
