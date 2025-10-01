@@ -30,7 +30,7 @@ class ColorDetectionNode(Node):
         # Publishers
         self.coord_publisher = self.create_publisher(
             Float32,
-            'x_val/float',
+            '/x_value/Float32',
             10
         )
         self.masked_publisher = self.create_publisher(
