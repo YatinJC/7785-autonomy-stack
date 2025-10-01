@@ -29,7 +29,7 @@ class chase_object(Node):
         )
 
         # Subscribers
-        self.create_subscription(Track, '/track/Custom_Track', self.track_callback, qos)
+        self.create_subscription(Track, '/track/Custom_Track', self.track_callback, 10)
 
         # Publisher
         self.publisher = self.create_publisher(Twist, '/cmd_vel', qos)

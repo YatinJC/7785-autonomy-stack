@@ -5,7 +5,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Float32
 import numpy as np
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
 from custom_msgs.msg import Track
 
@@ -13,8 +13,9 @@ class get_object_range(Node):
     def __init__(self):
         super().__init__("get_object_range")
         qos = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            history=HistoryPolicy.KEEP_LAST,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.UNKNOWN,
+            durability=DurabilityPolicy.VOLATILE,
             depth=10
         )
         # Subscriptions
@@ -23,7 +24,7 @@ class get_object_range(Node):
         self.create_subscription(LaserScan, "/scan", self.scan_callback, qos)
 
         # Publisher
-        self.pub = self.create_publisher(Track, '/track/Custom_Track', qos)
+        self.pub = self.create_publisher(Track, '/track/Custom_Track', 10)
 
         # Initialisation variables
         self.scan = None
