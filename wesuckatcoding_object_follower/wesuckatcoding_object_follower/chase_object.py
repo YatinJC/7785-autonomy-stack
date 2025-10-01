@@ -6,7 +6,7 @@ from std_msgs.msg import Float32
 from geometry_msgs.msg import Twist
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import math
-from wesuckatcoding_object_follower.msg import Track
+from custom_msgs.msg import Track
 
 class chase_object(Node):
     def __init__(self):

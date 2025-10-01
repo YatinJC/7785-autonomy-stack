@@ -22,10 +22,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'rotate_robot = wesuckatcoding_object_follower.rotate_robot:main',
+            'chase_object = wesuckatcoding_object_follower.chase_object:main',
             'detector = wesuckatcoding_object_follower.detect:main',
             'viewer = wesuckatcoding_object_follower.viewer:main',
-            'img_sub = wesuckatcoding_object_follower.img_sub:main'
+            'get_object_range = wesuckatcoding_object_follower.get_object_range:main',
         ],
     },
 )
