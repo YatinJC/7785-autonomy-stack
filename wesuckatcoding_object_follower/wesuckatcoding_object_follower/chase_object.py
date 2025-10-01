@@ -51,7 +51,7 @@ class chase_object(Node):
         phi_r = 6*R/(1+(math.sin(self.theta)*b/self.d))
         phi_l = 6*R/(1-(math.sin(self.theta)*b/self.d))
 
-        self.l = self.k*(self.d - 0.25)
+        self.l = self.k*(self.d - 0.5)
         if 30 > self.d > 20:
             self.l = 0 
         self.lmax = min(phi_r,phi_l)
@@ -62,9 +62,16 @@ class chase_object(Node):
         twist = Twist()
 
         twist.linear.x = self.l
-        twist.angular.z = 2*self.l*math.sin(self.theta)/self.d
+        twist.angular.z = 2*abs(self.l)*math.sin(self.theta)/self.d
 
         self.get_logger().info(f'Publishing Twist - linear.x: {twist.linear.x:.4f}, angular.z: {twist.angular.z:.4f}')
+        self.publisher.publish(twist)
+
+    def stop_robot(self):
+        """Publish a zero velocity command to stop the robot."""
+        twist = Twist()
+        # All fields default to 0.0
+        self.get_logger().info('Stopping robot - publishing zero velocity')
         self.publisher.publish(twist)
 
 def main(args=None):
@@ -75,6 +82,7 @@ def main(args=None):
     except KeyboardInterrupt:
         node.get_logger().info("ChaseObject stopped cleanly (Ctrl+C).")
     finally:
+        node.stop_robot()
         node.destroy_node()
         rclpy.shutdown()
 
