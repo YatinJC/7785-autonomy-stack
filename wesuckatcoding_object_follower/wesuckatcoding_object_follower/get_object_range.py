@@ -72,8 +72,10 @@ class get_object_range(Node):
         if theta_min < 0:
             theta_min += 2*np.pi
         theta_max = self.theta + self.width
-        if theta_max > 2*np.pi:
+        if theta_max >= 2*np.pi:
             theta_max -= 2*np.pi
+
+        self.get_logger().info(f'theta_min: {theta_min:.4f}, theta_max: {theta_max:.4f}')
 
         num_points = len(self.scan.ranges)
         all_angles = self.scan.angle_min + np.arange(num_points) * self.scan.angle_increment

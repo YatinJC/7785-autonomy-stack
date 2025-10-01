@@ -38,6 +38,8 @@ class chase_object(Node):
         self.theta = msg.theta
         self.d = msg.d
 
+        self.get_logger().info(f'Received Track - theta: {self.theta:.4f}, d: {self.d:.4f}')
+
         self.controller()
         self.publish_twist()
 
@@ -58,10 +60,11 @@ class chase_object(Node):
 
     def publish_twist(self):
         twist = Twist()
-    
+
         twist.linear.x = self.l
         twist.angular.z = 2*self.l*math.sin(self.theta)/self.d
 
+        self.get_logger().info(f'Publishing Twist - linear.x: {twist.linear.x:.4f}, angular.z: {twist.angular.z:.4f}')
         self.publisher.publish(twist)
 
 def main(args=None):
