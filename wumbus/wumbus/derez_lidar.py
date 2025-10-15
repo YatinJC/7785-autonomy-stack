@@ -17,7 +17,7 @@ import struct
 class DerezLidar(Node):
     def __init__(self):
         super().__init__('derez_lidar')
-
+        self.flag = True
         # TF2 setup
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -105,10 +105,10 @@ class DerezLidar(Node):
         # Store the transformed points (for later use)
         self.transformed_points = set(transformed_points)
         
-        flag = True
-        if flag == True:
+        
+        if self.flag == True:
             self.get_logger().info(f'Transformed points: {self.transformed_points}')
-            flag = False
+            self.flag = False
 
         # Create and publish PointCloud2 message
         pointcloud_msg = self.create_pointcloud2(self.transformed_points, msg.header.stamp)

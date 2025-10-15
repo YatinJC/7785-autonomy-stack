@@ -16,7 +16,7 @@ class SearchNode(Node):
         super().__init__('search_node')
         self.declare_parameter('resolution', 0.5)
         self.resolution = self.get_parameter('resolution').get_parameter_value().double_value
-
+        self.flag = True
         self.current_location = None
         self.goal_location = None
         self.obstacles = set()
@@ -121,11 +121,11 @@ class SearchNode(Node):
             # Add (x, y) tuple to the set
             new_obs.add((round(x,1), round(y,1)))
         self.obstacles = new_obs
+
         
-        flag = True
-        if flag == True:
+        if self.flag == True:
             self.get_logger().info(f'Obstacles: {self.obstacles}')
-            flag = False
+            self.flag = False
 
 
     def plan_and_publish(self):
