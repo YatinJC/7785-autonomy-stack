@@ -54,11 +54,11 @@ class DerezLidar(Node):
         """
         try:
             # Look up transform from base_scan to odom at the time of the scan
-            scan_time = Time.from_msg(msg.header.stamp)
+            # scan_time = Time.from_msg(msg.header.stamp)
             transform = self.tf_buffer.lookup_transform(
                 'odom',
                 'base_scan',
-                scan_time,
+                Time(),
                 timeout=Duration(seconds=0, nanoseconds=100000000)
             )
         except Exception as e:
