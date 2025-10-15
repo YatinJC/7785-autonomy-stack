@@ -31,6 +31,8 @@ class ControllerNode(Node):
         self.Init = True
         self.Init_ang = 0.0
         self.target_point = Point()
+        self.target_point.x = 0
+        self.target_point.y = 0
         self.Init_pos = Point()
         self.globalPos = Point()
 
