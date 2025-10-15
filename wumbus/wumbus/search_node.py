@@ -14,7 +14,6 @@ import math
 class SearchNode(Node):
     def __init__(self):
         super().__init__('search_node')
-        self.resolution = self.get_parameter('resolution').get_parameter_value().double_value
         self.flag = True
         self.current_location = None
         self.goal_location = None
