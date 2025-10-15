@@ -7,18 +7,10 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
-    # Declare launch arguments
-    resolution_arg = DeclareLaunchArgument(
-        'resolution',
-        default_value='0.5',
-        description='Resolution for A* search grid (in meters)'
-    )
-
     # Get launch configuration
     resolution = LaunchConfiguration('resolution')
 
     return LaunchDescription([
-        resolution_arg,
 
         # Derez LiDAR node - processes laser scan data and publishes obstacle points
         Node(

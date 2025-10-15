@@ -11,7 +11,7 @@ class GoalTracker(Node):
         super().__init__('goal_tracker')
 
         # Publisher for current goal (2D point)
-        self.goal_pub = self.create_publisher(Point, 'current_goal', 10)
+        self.goal_pub = self.create_publisher(Point, '/current_goal/Point', 10)
 
         # Subscriber to odometry
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)

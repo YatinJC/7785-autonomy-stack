@@ -104,6 +104,7 @@ class DerezLidar(Node):
 
         # Store the transformed points (for later use)
         self.transformed_points = transformed_points
+        self.get_logger().info(f'Transformed points: {self.transformed_points}')
 
         # Create and publish PointCloud2 message
         pointcloud_msg = self.create_pointcloud2(transformed_points, msg.header.stamp)

@@ -41,7 +41,7 @@ class SearchNode(Node):
             10)
         self.subscription_goal = self.create_subscription(
             Point,
-            'current_goal',
+            '/current_goal/Point',
             self.goal_callback,
             10)
         # Subscribe to obstacle points published as a PointCloud2
@@ -97,7 +97,7 @@ class SearchNode(Node):
             self.publisher_next.publish(none_point)
             return
         self.goal_location = (msg.x, msg.y)
-        self.plan_and_publish()
+        
 
     def obstacles_callback(self, msg):
         """
@@ -118,12 +118,13 @@ class SearchNode(Node):
 
             # Add (x, y) tuple to the set
             self.obstacles.add((x, y))
-        self.plan_and_publish()
+        self.get_logger().info(f'Obstacles: {self.obstacles}')
+
 
     def plan_and_publish(self):
         if self.current_location and self.goal_location and self.obstacles is not None:
             path = self.a_star(self.current_location, self.goal_location, self.obstacles, self.resolution)
-            if path and len(path) > 1:
+            if len(path) > 1:
                 next_point = path[1]  # Next step
                 point_msg = Point()
                 point_msg.x, point_msg.y = next_point[0], next_point[1]
