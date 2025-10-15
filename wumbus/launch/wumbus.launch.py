@@ -7,9 +7,6 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
-    # Get launch configuration
-    resolution = LaunchConfiguration('resolution')
-
     return LaunchDescription([
 
         # Derez LiDAR node - processes laser scan data and publishes obstacle points
