@@ -107,10 +107,10 @@ class DerezLidar(Node):
         self.get_logger().info(f'Transformed points: {self.transformed_points}')
 
         # Create and publish PointCloud2 message
-        pointcloud_msg = self.create_pointcloud2(transformed_points, msg.header.stamp)
+        pointcloud_msg = self.create_pointcloud2(self.transformed_points, msg.header.stamp)
         self.pointcloud_pub.publish(pointcloud_msg)
 
-        self.get_logger().debug(f'Processed {len(transformed_points)} valid points')
+        self.get_logger().debug(f'Processed {len(self.transformed_points)} valid points')
 
     def create_pointcloud2(self, points, stamp):
         """
