@@ -12,10 +12,9 @@ import numpy as np
 class ControllerNode(Node):
     k1 = 1.0  # Proportional gain (linear velocity)
     k2 = 1.0  # Proportional gain (angular velocity)
-    WHEEL_RADIUS = 0.033
-    TURNING_RADIUS = 0.16
-    MAX_LINEAR_VELOCITY = WHEEL_RADIUS * 2 * math.pi * 61 / 60
-    MAX_ANGULAR_VELOCITY = MAX_LINEAR_VELOCITY / TURNING_RADIUS
+    
+    MAX_LINEAR_VELOCITY = .2
+    MAX_ANGULAR_VELOCITY = 2.5
     MIN_LINEAR_VELOCITY = -MAX_LINEAR_VELOCITY
     MIN_ANGULAR_VELOCITY = -MAX_ANGULAR_VELOCITY
     THRESHOLD_DIST = 0.05  # Stop if within 5cm of target
@@ -62,6 +61,7 @@ class ControllerNode(Node):
     
     def odom_callback(self, msg):
         self.update_Odometry(msg)
+        self._logger.info(f'Current position: ({self.globalPos.x}, {self.globalPos.y}), orientation: {self.globalAng}')
         self.control_loop()
 
     def point_callback(self, msg):
@@ -69,7 +69,8 @@ class ControllerNode(Node):
         # Assign directly instead of accessing `msg.point` which would be present
         # if this were a PointStamped or a custom message.
         self.target_point = msg
-        self.get_logger().info(f'New target point received: ({msg.x}, {msg.y})')
+        # self.get_logger().info(f'New target point received: ({msg.x}, {msg.y})')
+        # self.control_loop()
 
     def control_loop(self):
         if self.current_pose is None or self.target_point is None:

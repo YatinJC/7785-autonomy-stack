@@ -33,9 +33,7 @@ def generate_launch_description():
             executable='search_node',
             name='search_node',
             output='screen',
-            parameters=[
-                {'resolution': resolution}
-            ],
+            parameters=[],
         ),
 
         # Controller node - executes path by sending velocity commands
