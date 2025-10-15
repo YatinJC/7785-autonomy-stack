@@ -21,8 +21,6 @@ class ControllerNode(Node):
 
     def __init__(self):
         super().__init__('controller')
-        self.current_pose = None
-        self.target_point = None
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         # Subscribe to the next location as a bare Point (x,y). The SearchNode publishes a Point.
@@ -87,12 +85,7 @@ class ControllerNode(Node):
         y = self.globalPos.y
         if self.flag == True:
             self.get_logger().info(f'Current position: ({x}, {y}), orientation: {self.globalAng}')
-        # Orientation as quaternion
-        q = self.globalAng
-        # Convert quaternion to yaw
-        siny_cosp = 2 * (q.w * q.z + q.x * q.y)
-        cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
-        theta = math.atan2(siny_cosp, cosy_cosp)
+        theta = self.globalAng
         # Target position
         tx = self.target_point.x
         ty = self.target_point.y
