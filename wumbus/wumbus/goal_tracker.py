@@ -75,11 +75,14 @@ class GoalTracker(Node):
             self.get_logger().info(f'Goal {self.goal_index + 1} reached')
             self.switch_goal()
 
+        self.publish_current_goal()
+        self.get_logger().info(f'Current Position: ({self.current_pose.x:.2f}, {self.current_pose.y:.2f}), Current Goal: ({current_goal.x}, {current_goal.y}), Distance: {distance:.2f}')
+   
     def switch_goal(self):
         # Move to the next goal if available
         if self.goal_index < len(self.goals) - 1:
             self.goal_index += 1
-            self.publish_current_goal()
+        
         else:
             self.get_logger().info('All goals reached!')
             # Publish None as current goal (use NaN values)

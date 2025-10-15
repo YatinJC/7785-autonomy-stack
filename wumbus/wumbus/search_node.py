@@ -21,6 +21,7 @@ class SearchNode(Node):
         self.goal_location = None
         self.obstacles = set()
 
+
         # Initialize odometry tracking variables
         self.Init = True
         self.Init_ang = 0.0
@@ -109,6 +110,7 @@ class SearchNode(Node):
         point_step = msg.point_step  # Should be 12 bytes (3 floats)
 
         # Iterate through the point cloud data
+        new_obs = set()
         for i in range(msg.width):
             # Calculate the byte offset for this point
             offset = i * point_step
@@ -117,8 +119,13 @@ class SearchNode(Node):
             x, y, z = struct.unpack_from('fff', msg.data, offset)
 
             # Add (x, y) tuple to the set
-            self.obstacles.add((round(x,1), round(y,1)))
-        self.get_logger().info(f'Obstacles: {self.obstacles}')
+            new_obs.add((round(x,1), round(y,1)))
+        self.obstacles = new_obs
+        
+        flag = True
+        if flag == True:
+            self.get_logger().info(f'Obstacles: {self.obstacles}')
+            flag = False
 
 
     def plan_and_publish(self):
