@@ -27,11 +27,12 @@ class ControllerNode(Node):
         self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         # Subscribe to the next location as a bare Point (x,y). The SearchNode publishes a Point.
         self.create_subscription(Point, '/next_location/point', self.point_callback, 10)
-        
+        self.flag = True
 
         # Initialize odometry tracking variables
         self.Init = True
         self.Init_ang = 0.0
+        self.target_point = Point()
         self.Init_pos = Point()
         self.globalPos = Point()
 
@@ -61,7 +62,7 @@ class ControllerNode(Node):
     
     def odom_callback(self, msg):
         self.update_Odometry(msg)
-        self._logger.info(f'Current position: ({self.globalPos.x}, {self.globalPos.y}), orientation: {self.globalAng}')
+        # self._logger.info(f'Current position: ({self.globalPos.x}, {self.globalPos.y}), orientation: {self.globalAng}')
         self.control_loop()
 
     def point_callback(self, msg):
@@ -73,8 +74,6 @@ class ControllerNode(Node):
         # self.control_loop()
 
     def control_loop(self):
-        if self.current_pose is None or self.target_point is None:
-            return
         # Handle NaN target point (all goals reached)
         if math.isnan(self.target_point.x) or math.isnan(self.target_point.y):
             twist = Twist()
@@ -86,6 +85,8 @@ class ControllerNode(Node):
         # Get current position and orientation
         x = self.globalPos.x
         y = self.globalPos.y
+        if self.flag == True:
+            self.get_logger().info(f'Current position: ({x}, {y}), orientation: {self.globalAng}')
         # Orientation as quaternion
         q = self.globalAng
         # Convert quaternion to yaw
@@ -95,12 +96,17 @@ class ControllerNode(Node):
         # Target position
         tx = self.target_point.x
         ty = self.target_point.y
+        if self.flag == True:
+            self.get_logger().info(f'Target position: ({tx}, {ty})')
         # Compute error
         dx = tx - x
         dy = ty - y
         distance = math.sqrt(dx**2 + dy**2)
         target_theta = math.atan2(dy, dx)
         normalised_angle = self.normalize_angle(target_theta - theta)
+        if self.flag == True:
+            self.get_logger().info(f'Error: distance={distance}, angle error={normalised_angle}')
+            self.flag = False
         # Proportional control
         v = self.k1 * distance if distance > self.THRESHOLD_DIST else 0.0
         w = self.k2 * normalised_angle if abs(normalised_angle) > 0.05 else 0.0

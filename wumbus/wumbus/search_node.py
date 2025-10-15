@@ -90,7 +90,7 @@ class SearchNode(Node):
         # Check for NaN goal (all goals reached)
         if math.isnan(msg.x) or math.isnan(msg.y):
             self.goal_location = None
-            self.get_logger().info('All goals reached: stopping path planning.')
+            # self.get_logger().info('All goals reached: stopping path planning.')
             # Publish NaN to /next_location/point so controller can stop
             none_point = Point(x=math.nan, y=math.nan, z=math.nan)
             self.publisher_next.publish(none_point)
@@ -135,7 +135,7 @@ class SearchNode(Node):
                 point_msg.x, point_msg.y = next_point[0], next_point[1]
                 point_msg.z = 0.0
                 self.publisher_next.publish(point_msg)
-                self.get_logger().info(f'Next point published: ({point_msg.x}, {point_msg.y})')
+                # self.get_logger().info(f'Next point published: ({point_msg.x}, {point_msg.y})')
 
     def a_star(self, start, goal, obstacles):
         from heapq import heappush, heappop
