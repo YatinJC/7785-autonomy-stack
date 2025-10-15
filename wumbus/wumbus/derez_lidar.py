@@ -103,7 +103,7 @@ class DerezLidar(Node):
             transformed_points.append((x_rounded, y_rounded))
 
         # Store the transformed points (for later use)
-        self.transformed_points = transformed_points
+        self.transformed_points = set(transformed_points)
         self.get_logger().info(f'Transformed points: {self.transformed_points}')
 
         # Create and publish PointCloud2 message

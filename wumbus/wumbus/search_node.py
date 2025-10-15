@@ -117,7 +117,7 @@ class SearchNode(Node):
             x, y, z = struct.unpack_from('fff', msg.data, offset)
 
             # Add (x, y) tuple to the set
-            self.obstacles.add((x, y))
+            self.obstacles.add((round(x,1), round(y,1)))
         self.get_logger().info(f'Obstacles: {self.obstacles}')
 
 
