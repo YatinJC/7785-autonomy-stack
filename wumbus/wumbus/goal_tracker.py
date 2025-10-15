@@ -9,7 +9,7 @@ import numpy as np
 class GoalTracker(Node):
     def __init__(self):
         super().__init__('goal_tracker')
-
+        self.flag = True
         # Publisher for current goal (2D point)
         self.goal_pub = self.create_publisher(Point, '/current_goal/Point', 10)
 
@@ -76,12 +76,15 @@ class GoalTracker(Node):
             self.switch_goal()
 
         self.publish_current_goal()
-        self.get_logger().info(f'Current Position: ({self.current_pose.x:.2f}, {self.current_pose.y:.2f}), Current Goal: ({current_goal.x}, {current_goal.y}), Distance: {distance:.2f}')
+        if self.flag == True:
+            self.get_logger().info(f'Current Position: ({self.current_pose.x:.2f}, {self.current_pose.y:.2f}), Current Goal: ({current_goal.x}, {current_goal.y}), Distance: {distance:.2f}')
+            self.flag = False
    
     def switch_goal(self):
         # Move to the next goal if available
         if self.goal_index < len(self.goals) - 1:
             self.goal_index += 1
+            self.flag = True
         
         else:
             self.get_logger().info('All goals reached!')

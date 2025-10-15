@@ -14,7 +14,6 @@ import math
 class SearchNode(Node):
     def __init__(self):
         super().__init__('search_node')
-        self.declare_parameter('resolution', 0.5)
         self.resolution = self.get_parameter('resolution').get_parameter_value().double_value
         self.flag = True
         self.current_location = None
@@ -123,24 +122,27 @@ class SearchNode(Node):
         self.obstacles = new_obs
 
         
-        if self.flag == True:
-            self.get_logger().info(f'Obstacles: {self.obstacles}')
-            self.flag = False
+        # if self.flag == True:
+        #     self.get_logger().info(f'Obstacles: {self.obstacles}')
+        #     self.flag = False
 
 
     def plan_and_publish(self):
         if self.current_location and self.goal_location and self.obstacles is not None:
-            path = self.a_star(self.current_location, self.goal_location, self.obstacles, self.resolution)
+            path = self.a_star(self.current_location, self.goal_location, self.obstacles)
             if len(path) > 1:
                 next_point = path[1]  # Next step
                 point_msg = Point()
                 point_msg.x, point_msg.y = next_point[0], next_point[1]
                 point_msg.z = 0.0
                 self.publisher_next.publish(point_msg)
+                self.get_logger().info(f'Next point published: ({point_msg.x}, {point_msg.y})')
 
-    def a_star(self, start, goal, obstacles, resolution):
+    def a_star(self, start, goal, obstacles):
         from heapq import heappush, heappop
+        resolution = .1
         def neighbors(node):
+            resolution = .1
             x, y = node
             moves = [
                 (resolution, 0, 1 * resolution ** 2),

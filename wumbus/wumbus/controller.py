@@ -28,11 +28,7 @@ class ControllerNode(Node):
         self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         # Subscribe to the next location as a bare Point (x,y). The SearchNode publishes a Point.
         self.create_subscription(Point, '/next_location/point', self.point_callback, 10)
-        # Use a timer to run the control loop at a fixed rate (20Hz).
-        # This decouples control updates from incoming message rates (odometry or goal updates)
-        # so the controller can continue to compute and publish commands even if callbacks are
-        # momentarily delayed or arrive at irregular intervals.
-        self.timer = self.create_timer(0.05, self.control_loop)
+        
 
         # Initialize odometry tracking variables
         self.Init = True
@@ -64,15 +60,16 @@ class ControllerNode(Node):
         self.globalPos.y = Mrot.item((1,0))*position.x + Mrot.item((1,1))*position.y - self.Init_pos.y
         self.globalAng = orientation - self.Init_ang
     
-
     def odom_callback(self, msg):
         self.update_Odometry(msg)
+        self.control_loop()
 
     def point_callback(self, msg):
         # `msg` is a geometry_msgs/Point (x,y,z) published by SearchNode.
         # Assign directly instead of accessing `msg.point` which would be present
         # if this were a PointStamped or a custom message.
         self.target_point = msg
+        self.get_logger().info(f'New target point received: ({msg.x}, {msg.y})')
 
     def control_loop(self):
         if self.current_pose is None or self.target_point is None:
@@ -114,6 +111,7 @@ class ControllerNode(Node):
         twist.linear.x = v
         twist.angular.z = w
         self.cmd_pub.publish(twist)
+        self.get_logger().info(f'Cmd published: linear.x={v:.2f}, angular.z={w:.2f}, distance to target={distance:.2f}, angle error={normalised_angle:.2f}')
 
     def normalize_angle(self, angle):
         while angle > math.pi:
