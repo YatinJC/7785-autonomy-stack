@@ -10,6 +10,7 @@ from sensor_msgs.msg import PointCloud2
 import struct
 import numpy as np
 import math
+import heapq
 
 class SearchNode(Node):
     def __init__(self):
@@ -81,15 +82,15 @@ class SearchNode(Node):
     def odom_callback(self, msg):
         # Round odometry to 1 decimal place as requested to match obstacle map scaling
         self.update_Odometry(msg)
-        x = round(self.globalPos.x, 1)
-        y = round(self.globalPos.y, 1)
+        x = round(self.globalPos.x,1)
+        y = round(self.globalPos.y,1)
         self.current_location = (x, y)
         self.plan_and_publish()
 
     def goal_callback(self, msg):
         # Check for NaN goal (all goals reached)
         if math.isnan(msg.x) or math.isnan(msg.y):
-            self.goal_location = None
+            # self.goal_location = None
             # self.get_logger().info('All goals reached: stopping path planning.')
             # Publish NaN to /next_location/point so controller can stop
             none_point = Point(x=math.nan, y=math.nan, z=math.nan)
@@ -104,8 +105,10 @@ class SearchNode(Node):
         """
 
         # Extract point data from the PointCloud2 message
-        # The message has fields x, y, z (each 4 bytes, float32)
-        point_step = msg.point_step  # Should be 12 bytes (3 floats)
+        # The message has fields x, y (each 4 bytes, float32)
+        # Note: derez_lidar packs 3 floats (x, y, z=0.0) but only defines 2 fields
+        # So we need to unpack based on the actual packed data (12 bytes per point)
+        point_step = 8  # 3 floats * 4 bytes each (x, y, z)
 
         # Iterate through the point cloud data
         new_obs = set()
@@ -114,66 +117,163 @@ class SearchNode(Node):
             offset = i * point_step
 
             # Unpack x, y, z values (we only need x and y)
-            x, y, z = struct.unpack_from('fff', msg.data, offset)
+            x, y = struct.unpack_from('ff', msg.data, offset)
 
             # Add (x, y) tuple to the set
-            new_obs.add((round(x,1), round(y,1)))
+            new_obs.add((round(x, 1), round(y, 1)))
         self.obstacles = new_obs
 
         
         # if self.flag == True:
-        #     self.get_logger().info(f'Obstacles: {self.obstacles}')
-        #     self.flag = False
+        self.get_logger().info(f'Obstacles: {self.obstacles}')
+            # self.flag = False
 
 
     def plan_and_publish(self):
+
         if self.current_location and self.goal_location and self.obstacles is not None:
-            path = self.a_star(self.current_location, self.goal_location, self.obstacles)
+            path = self.astar(self.current_location, self.goal_location, self.obstacles, resolution=0.1)
+            self.get_logger().info(f'Current: {self.current_location}, Goal: {self.goal_location}, Path: {path}')
+            
+            if path is None:
+                self.get_logger().warn('No path found to goal!')
+                self.publisher_next.publish(Point(x=0., y=0., z=0.0))
+                return
+                
             if len(path) > 1:
-                next_point = path[1]  # Next step
+                next_point = path[1]  # Next point in the path
                 point_msg = Point()
-                point_msg.x, point_msg.y = next_point[0], next_point[1]
+                point_msg.x, point_msg.y = round(next_point[0],1), round(next_point[1],1)
                 point_msg.z = 0.0
                 self.publisher_next.publish(point_msg)
-                # self.get_logger().info(f'Next point published: ({point_msg.x}, {point_msg.y})')
+                self.get_logger().info(f'Next point published: ({point_msg.x}, {point_msg.y})')
 
-    def a_star(self, start, goal, obstacles):
-        from heapq import heappush, heappop
-        resolution = .1
-        def neighbors(node):
-            resolution = .1
-            x, y = node
-            moves = [
-                (resolution, 0, 1 * resolution ** 2),
-                (-resolution, 0, 1 * resolution ** 2),
-                (0, resolution, 1 * resolution ** 2),
-                (0, -resolution, 1 * resolution ** 2),
-                (resolution, resolution, 2 * resolution ** 2),
-                (resolution, -resolution, 2 * resolution ** 2),
-                (-resolution, resolution, 2 * resolution ** 2),
-                (-resolution, -resolution, 2 * resolution ** 2),
-            ]
-            for dx, dy, cost in moves:
-                nx, ny = x + dx, y + dy
-                if (nx, ny) not in obstacles:
-                    yield (nx, ny), cost
-        def heuristic(a, b):
-            return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+    def astar(self, start, goal, obstacles, resolution):
+        """
+        A* path planner on an 8-connected grid.
 
-        open_set = []
-        heappush(open_set, (0 + heuristic(start, goal), 0, start, [start]))
-        closed_set = set()
-        while open_set:
-            f, g, current, path = heappop(open_set)
-            if current in closed_set:
+        Inputs:
+        - start: (x, y) tuple in world coordinates (floats)
+        - goal: (x, y) tuple in world coordinates (floats)
+        - obstacles: set or iterable of (x, y) world coordinates representing blocked points
+        - resolution: grid cell size (float). Grid coordinates are snapped to multiples of this.
+
+        Returns:
+        - path: list of (x, y) world coordinates from start to goal (start included). If no path,
+        raises ValueError.
+
+        Notes:
+        - This implementation quantizes the world into a grid using "resolution" to avoid floating-point
+        hashing issues and to ensure proper A* optimality guarantees on the grid graph.
+        - Diagonal corner-cutting around obstacles is prevented.
+        """
+
+        # --- Helpers: grid/world conversions and costs ---
+        def to_grid(p):
+            """Convert world coordinate (float, float) to integer grid cell (i, j)."""
+            return (int(round(p[0] / resolution)), int(round(p[1] / resolution)))
+
+        def to_world(c):
+            """Convert integer grid cell (i, j) to world coordinate (x, y)."""
+            return (round(c[0] * resolution,1), round(c[1] * resolution,1))
+
+        def step_cost(a, b):
+            """Cost between adjacent grid cells a->b (cardinal: res, diagonal: res*sqrt(2))."""
+            dx = abs(a[0] - b[0])
+            dy = abs(a[1] - b[1])
+            if dx + dy == 1:
+                return resolution
+            # diagonal
+            return math.sqrt(2) * resolution
+
+        def heuristic(c):
+            """Consistent Euclidean heuristic in grid space scaled by resolution."""
+            dx = c[0] - goal_c[0]
+            dy = c[1] - goal_c[1]
+            return math.hypot(dx, dy) * resolution
+
+        # --- Inflate obstacles in grid space ---
+        def inflate_obstacles_grid(obstacles_w):
+            """Inflate obstacles by 1 cell in Chebyshev radius in grid space."""
+            avoid_cells = set()
+            for (x, y) in obstacles_w:
+                cx, cy = to_grid((x, y))
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        n = (cx + dx, cy + dy)
+                        if n == goal_c:
+                            continue
+                        avoid_cells.add(n)
+            return avoid_cells
+
+        # --- Neighbor generation with corner-cutting prevention ---
+        def neighbors(c, avoid):
+            x, y = c
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    nx, ny = x + dx, y + dy
+                    n = (nx, ny)
+                    if n in avoid:
+                        continue
+                    # prevent diagonal corner cutting: require the orthogonal cells to be free
+                    if dx != 0 and dy != 0:
+                        if (x + dx, y) in avoid or (x, y + dy) in avoid:
+                            continue
+                    yield n
+
+        # Early exit
+        if start == goal:
+            return [start]
+
+        # Convert to grid
+        start_c = to_grid(start)
+        goal_c = to_grid(goal)
+
+        avoid = inflate_obstacles_grid(obstacles)
+        # Ensure start/goal are traversable even if inside inflated region
+        if start_c in avoid:
+            avoid.remove(start_c)
+
+        # A* structures
+        open_heap = []  # entries: (f, h, (ix, iy))
+        heapq.heappush(open_heap, (heuristic(start_c), heuristic(start_c), start_c))
+        came_from = {}
+        g_score = {start_c: 0.0}
+        closed = set()
+
+        while open_heap:
+            f, h, current = heapq.heappop(open_heap)
+            if current in closed:
                 continue
-            if heuristic(current, goal) < resolution ** 2:
-                return path + [goal]
-            closed_set.add(current)
-            for neighbor, move_cost in neighbors(current):
-                if neighbor in closed_set:
+            if current == goal_c:
+                # reconstruct path (grid -> world)
+                grid_path = [current]
+                while current in came_from:
+                    current = came_from[current]
+                    grid_path.append(current)
+                grid_path.reverse()
+                world_path = [to_world(c) for c in grid_path]
+                # ensure exact start/goal endpoints for nicety
+                if world_path[0] != start:
+                    world_path[0] = start
+                if world_path[-1] != goal:
+                    world_path.append(goal)
+                return world_path
+
+            closed.add(current)
+
+            for n in neighbors(current, avoid):
+                if n in closed:
                     continue
-                heappush(open_set, (g + move_cost + heuristic(neighbor, goal), g + move_cost, neighbor, path + [neighbor]))
+                tentative_g = g_score[current] + step_cost(current, n)
+                if tentative_g < g_score.get(n, float("inf")):
+                    came_from[n] = current
+                    g_score[n] = tentative_g
+                    hn = heuristic(n)
+                    heapq.heappush(open_heap, (tentative_g + hn, hn, n))
+
         return None
 
 def main(args=None):

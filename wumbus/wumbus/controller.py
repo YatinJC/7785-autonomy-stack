@@ -10,11 +10,11 @@ import numpy as np
 
 
 class ControllerNode(Node):
-    k1 = 1.0  # Proportional gain (linear velocity)
-    k2 = 1.0  # Proportional gain (angular velocity)
+    k1 = 2.  # Proportional gain (linear velocity)
+    k2 = 5.  # Proportional gain (angular velocity)
     
-    MAX_LINEAR_VELOCITY = .2
-    MAX_ANGULAR_VELOCITY = 2.5
+    MAX_LINEAR_VELOCITY = .1
+    MAX_ANGULAR_VELOCITY = 1.0
     MIN_LINEAR_VELOCITY = -MAX_LINEAR_VELOCITY
     MIN_ANGULAR_VELOCITY = -MAX_ANGULAR_VELOCITY
     THRESHOLD_DIST = 0.05  # Stop if within 5cm of target
@@ -31,8 +31,8 @@ class ControllerNode(Node):
         self.Init = True
         self.Init_ang = 0.0
         self.target_point = Point()
-        self.target_point.x = 0
-        self.target_point.y = 0
+        self.target_point.x = 0.
+        self.target_point.y = 0.
         self.Init_pos = Point()
         self.globalPos = Point()
 
@@ -99,12 +99,10 @@ class ControllerNode(Node):
         distance = math.sqrt(dx**2 + dy**2)
         target_theta = math.atan2(dy, dx)
         normalised_angle = self.normalize_angle(target_theta - theta)
-        if self.flag == True:
-            self.get_logger().info(f'Error: distance={distance}, angle error={normalised_angle}')
-            self.flag = False
+        
         # Proportional control
-        v = self.k1 * distance if distance > self.THRESHOLD_DIST else 0.0
-        w = self.k2 * normalised_angle if abs(normalised_angle) > 0.05 else 0.0
+        v = self.k1 * distance
+        w = self.k2 * normalised_angle
         # Limit velocities
         v = max(min(v, self.MAX_LINEAR_VELOCITY), self.MIN_LINEAR_VELOCITY)
         w = max(min(w, self.MAX_ANGULAR_VELOCITY), self.MIN_ANGULAR_VELOCITY)
