@@ -59,7 +59,7 @@ class SearchNode(Node):
             Point,
             '/next_location/point',
             10)
-    
+        self.get_logger().info('Search Node started')
 
     def odom_callback(self, msg):
         """
@@ -67,7 +67,7 @@ class SearchNode(Node):
         """
         position = msg.pose.pose.position
         self.current_location = (round(position.x, 1), round(position.y, 1))
-
+        self.get_logger().info(f'Current location updated: {self.current_location}')
         # Check if we need to advance to the next waypoint or replan
         if self.current_path and self.goal_location:
             # Check if current waypoint is reached
@@ -107,6 +107,7 @@ class SearchNode(Node):
             self.goal_location = None
             return
         if (round(msg.x,1), round(msg.y,1)) == self.goal_location:
+            self.get_logger().info('Same goal as before, ignoring.')
             return  # Same goal as before, ignore
         self.goal_location = (round(msg.x, 1), round(msg.y, 1))
         self.get_logger().info(f'New goal received: {self.goal_location}')

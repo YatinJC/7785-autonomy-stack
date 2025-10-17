@@ -29,6 +29,7 @@ class GoalTracker(Node):
 
         # Publish the first goal
         self.publish_current_goal()
+        self.get_logger().info('Goal Tracker Node started')
 
     def odom_callback(self, msg: Odometry):
         """

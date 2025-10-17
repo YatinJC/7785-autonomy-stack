@@ -34,6 +34,7 @@ class ControllerNode(Node):
         self.target_point = Point()
         self.target_point.x = 0.
         self.target_point.y = 0.
+        self.get_logger().info('Controller Node started')
 
     def odom_callback(self, msg):
         """

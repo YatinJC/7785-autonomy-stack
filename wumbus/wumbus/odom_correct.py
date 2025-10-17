@@ -95,6 +95,7 @@ class OdometryCorrectNode(Node):
 
         # Publish corrected odometry
         self.odom_pub.publish(corrected_odom)
+        self.get_logger().debug(f'Published corrected odometry: pos=({self.globalPos.x:.3f}, {self.globalPos.y:.3f}), ang={self.globalAng:.3f}')    
 
 
 def main(args=None):

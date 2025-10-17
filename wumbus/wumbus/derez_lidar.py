@@ -123,7 +123,7 @@ class DerezLidar(Node):
             # Filter out invalid points
             if math.isnan(range_val) or math.isinf(range_val):
                 continue
-            if range_val < msg.range_min or range_val > msg.range_max:
+            if range_val < msg.range_min or range_val > 2.0:
                 continue
 
             # Calculate angle for this measurement
