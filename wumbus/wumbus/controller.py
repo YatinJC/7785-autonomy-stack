@@ -31,9 +31,8 @@ class ControllerNode(Node):
         # Current position and orientation from corrected odometry
         self.globalPos = Point()
         self.globalAng = 0.0
-        self.target_point = Point()
-        self.target_point.x = 0.
-        self.target_point.y = 0.
+        self.target_point = None
+     
         self.get_logger().info('Controller Node started')
 
     def odom_callback(self, msg):
@@ -46,9 +45,10 @@ class ControllerNode(Node):
         # Extract yaw angle from quaternion
         q = msg.pose.pose.orientation
         self.globalAng = np.arctan2(2*(q.w*q.z+q.x*q.y), 1-2*(q.y*q.y+q.z*q.z))
-
-        # Run control loop
-        self.control_loop()
+        
+        if self.target_point is not None:
+            # Run control loop
+            self.control_loop()
 
     def point_callback(self, msg):
         # `msg` is a geometry_msgs/Point (x,y,z) published by SearchNode.
