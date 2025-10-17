@@ -27,6 +27,7 @@ setup(
             'derez_lidar = wumbus.derez_lidar:main',
             'goal_tracker = wumbus.goal_tracker:main',
             'search_node = wumbus.search_node:main',
+            'odom_correct = wumbus.odom_correct:main',
         ],
     },
 )

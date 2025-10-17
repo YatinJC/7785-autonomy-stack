@@ -6,21 +6,29 @@ from rclpy.time import Time
 from rclpy.duration import Duration
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from sensor_msgs.msg import LaserScan, PointCloud2, PointField
+from nav_msgs.msg import Odometry
 from std_msgs.msg import Header
 from tf2_ros import Buffer, TransformListener
 # from tf2_ros import TransformException
 from collections import Counter
 import math
 import struct
+import numpy as np
 
 
 class DerezLidar(Node):
     def __init__(self):
         super().__init__('derez_lidar')
         self.flag = True
-        # TF2 setup
+
+        # TF2 setup for base_scan to base_link transform (static transform)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+
+        # Store current corrected odometry
+        self.current_odom = None
+        self.current_position = None
+        self.current_yaw = None
 
         # QoS profile for sensor data
         sensor_qos = QoSProfile(
@@ -28,6 +36,14 @@ class DerezLidar(Node):
             durability=DurabilityPolicy.VOLATILE,
             history=HistoryPolicy.KEEP_LAST,
             depth=10
+        )
+
+        # Subscribe to corrected odometry
+        self.odom_sub = self.create_subscription(
+            Odometry,
+            '/odom_corrected',
+            self.odom_callback,
+            10
         )
 
         # Subscribe to laser scan
@@ -47,33 +63,58 @@ class DerezLidar(Node):
 
         self.get_logger().info('Derez LiDAR node started')
 
+    def odom_callback(self, msg: Odometry):
+        """
+        Store the latest corrected odometry data
+        """
+        self.current_odom = msg
+        self.current_position = msg.pose.pose.position
+
+        # Extract yaw from quaternion
+        q = msg.pose.pose.orientation
+        self.current_yaw = np.arctan2(
+            2.0 * (q.w * q.z + q.x * q.y),
+            1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        )
+
     def scan_callback(self, msg: LaserScan):
         """
-        Process laser scan data: convert to x,y coordinates, transform to /odom frame,
-        and round to nearest 0.1
+        Process laser scan data: convert to x,y coordinates, transform to global frame
+        using corrected odometry, and round to nearest 0.1
         """
+        # Check if we have corrected odometry data
+        if self.current_position is None or self.current_yaw is None:
+            self.get_logger().warn('Waiting for corrected odometry data...', throttle_duration_sec=5.0)
+            return
+
+        # Get robot's position and orientation in global frame from corrected odom
+        robot_x = self.current_position.x
+        robot_y = self.current_position.y
+        robot_yaw = self.current_yaw
+
+        # Try to get transform from base_link to base_scan (usually static)
+        # This accounts for the LiDAR's position on the robot
         try:
-            # Look up transform from base_scan to odom at the time of the scan
-            # scan_time = Time.from_msg(msg.header.stamp)
             transform = self.tf_buffer.lookup_transform(
-                'odom',
+                'base_link',
                 'base_scan',
                 Time(),
                 timeout=Duration(seconds=0, nanoseconds=100000000)
             )
+            # Extract offset from base_link to base_scan
+            scan_offset_x = transform.transform.translation.x
+            scan_offset_y = transform.transform.translation.y
+            q = transform.transform.rotation
+            scan_offset_yaw = math.atan2(
+                2.0 * (q.w * q.z + q.x * q.y),
+                1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+            )
         except Exception as e:
-            self.get_logger().warn(f'Transform lookup failed: {e}', throttle_duration_sec=5.0)
-            return
-
-        # Extract transform components
-        trans = transform.transform.translation
-        rot = transform.transform.rotation
-
-        # Convert quaternion to yaw angle
-        yaw = math.atan2(
-            2.0 * (rot.w * rot.z + rot.x * rot.y),
-            1.0 - 2.0 * (rot.y * rot.y + rot.z * rot.z)
-        )
+            # If transform not available, assume scan is at base_link
+            self.get_logger().debug(f'Using base_link frame (no base_scan transform): {e}')
+            scan_offset_x = 0.0
+            scan_offset_y = 0.0
+            scan_offset_yaw = 0.0
 
         # Process each laser scan point
         transformed_points = []
@@ -89,16 +130,20 @@ class DerezLidar(Node):
             angle = msg.angle_min + i * msg.angle_increment
 
             # Convert polar to Cartesian in base_scan frame
-            x_base = range_val * math.cos(angle)
-            y_base = range_val * math.sin(angle)
+            x_scan = range_val * math.cos(angle)
+            y_scan = range_val * math.sin(angle)
 
-            # Transform to odom frame
-            x_odom = trans.x + x_base * math.cos(yaw) - y_base * math.sin(yaw)
-            y_odom = trans.y + x_base * math.sin(yaw) + y_base * math.cos(yaw)
+            # Transform from base_scan to base_link
+            x_base = scan_offset_x + x_scan * math.cos(scan_offset_yaw) - y_scan * math.sin(scan_offset_yaw)
+            y_base = scan_offset_y + x_scan * math.sin(scan_offset_yaw) + y_scan * math.cos(scan_offset_yaw)
+
+            # Transform from base_link to global frame using corrected odometry
+            x_global = robot_x + x_base * math.cos(robot_yaw) - y_base * math.sin(robot_yaw)
+            y_global = robot_y + x_base * math.sin(robot_yaw) + y_base * math.cos(robot_yaw)
 
             # Round to nearest 0.1
-            x_rounded = round(x_odom, 1)
-            y_rounded = round(y_odom, 1)
+            x_rounded = round(x_global, 1)
+            y_rounded = round(y_global, 1)
 
             transformed_points.append((x_rounded, y_rounded))
 
@@ -106,9 +151,9 @@ class DerezLidar(Node):
         self.transformed_points = set(transformed_points)
         
         
-        if self.flag == True:
-            self.get_logger().info(f'Transformed points: {self.transformed_points}')
-            self.flag = False
+        # if self.flag == True:
+        #     self.get_logger().info(f'Transformed points: {self.transformed_points}')
+        #     self.flag = False
 
         # Create and publish PointCloud2 message
         pointcloud_msg = self.create_pointcloud2(self.transformed_points, msg.header.stamp)
@@ -118,11 +163,11 @@ class DerezLidar(Node):
 
     def create_pointcloud2(self, points, stamp):
         """
-        Create a PointCloud2 message from a list of (x, y) tuples
+        Create a PointCloud2 message from a list of (x, y) tuples in global frame
         """
         header = Header()
         header.stamp = stamp
-        header.frame_id = 'odom'
+        header.frame_id = 'odom_corrected'
 
         # Define fields for x, y, z (z will be 0)
         fields = [

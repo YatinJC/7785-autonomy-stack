@@ -9,6 +9,15 @@ from launch.substitutions import LaunchConfiguration
 def generate_launch_description():
     return LaunchDescription([
 
+        # Odometry correction node - corrects raw odometry to start at (0,0) with 0 heading
+        Node(
+            package='wumbus',
+            executable='odom_correct',
+            name='odom_correct',
+            output='screen',
+            parameters=[],
+        ),
+
         # Derez LiDAR node - processes laser scan data and publishes obstacle points
         Node(
             package='wumbus',

@@ -11,8 +11,11 @@ import struct
 import numpy as np
 import math
 import heapq
+import time
 
 class SearchNode(Node):
+    WAYPOINT_THRESHOLD = 0.05  # Distance threshold to consider waypoint reached
+
     def __init__(self):
         super().__init__('search_node')
         self.flag = True
@@ -20,12 +23,10 @@ class SearchNode(Node):
         self.goal_location = None
         self.obstacles = set()
 
-
-        # Initialize odometry tracking variables
-        self.Init = True
-        self.Init_ang = 0.0
-        self.Init_pos = Point()
-        self.globalPos = Point()
+        # Path tracking
+        self.current_path = None  # List of waypoints from current position to goal
+        self.current_waypoint_index = 0  # Index of the next waypoint to reach
+        self.is_planning = False  # Flag to indicate if path planning is in progress
 
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -34,81 +35,96 @@ class SearchNode(Node):
             depth=10
         )
 
-        self.subscription_odom = self.create_subscription(
-            Odometry,
-            '/odom',
-            self.odom_callback,
-            10)
+        
         self.subscription_goal = self.create_subscription(
             Point,
             '/current_goal/Point',
             self.goal_callback,
             10)
+        
         # Subscribe to obstacle points published as a PointCloud2
         self.subscription_obstacles = self.create_subscription(
             PointCloud2,
             '/obstacle_points/PointCloud2',
             self.obstacles_callback,
             qos)
-            
+        
+        self.odom_sub = self.create_subscription(
+            Odometry,
+            '/odom_corrected',
+            self.odom_callback,
+            10
+        )
         self.publisher_next = self.create_publisher(
             Point,
             '/next_location/point',
             10)
-    def update_Odometry(self,Odom):
-        position = Odom.pose.pose.position
-        
-        #Orientation uses the quaternion aprametrization.
-        #To get the angular position along the z-axis, the following equation is required.
-        q = Odom.pose.pose.orientation
-        orientation = np.arctan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z))
-
-        if self.Init:
-            #The initial data is stored to by subtracted to all the other values as we want to start at position (0,0) and orientation 0
-            self.Init = False
-            self.Init_ang = orientation
-            self.globalAng = self.Init_ang
-            Mrot = np.matrix([[np.cos(self.Init_ang), np.sin(self.Init_ang)],[-np.sin(self.Init_ang), np.cos(self.Init_ang)]])        
-            self.Init_pos.x = Mrot.item((0,0))*position.x + Mrot.item((0,1))*position.y
-            self.Init_pos.y = Mrot.item((1,0))*position.x + Mrot.item((1,1))*position.y
-            self.Init_pos.z = position.z
-        Mrot = np.matrix([[np.cos(self.Init_ang), np.sin(self.Init_ang)],[-np.sin(self.Init_ang), np.cos(self.Init_ang)]])        
-
-        #We subtract the initial values
-        self.globalPos.x = Mrot.item((0,0))*position.x + Mrot.item((0,1))*position.y - self.Init_pos.x
-        self.globalPos.y = Mrot.item((1,0))*position.x + Mrot.item((1,1))*position.y - self.Init_pos.y
-        self.globalAng = orientation - self.Init_ang
+    
 
     def odom_callback(self, msg):
-        # Round odometry to 1 decimal place as requested to match obstacle map scaling
-        self.update_Odometry(msg)
-        x = round(self.globalPos.x,1)
-        y = round(self.globalPos.y,1)
-        self.current_location = (x, y)
-        self.plan_and_publish()
+        """
+        Update current location from corrected odometry and check/advance waypoints
+        """
+        position = msg.pose.pose.position
+        self.current_location = (round(position.x, 1), round(position.y, 1))
+
+        # Check if we need to advance to the next waypoint or replan
+        if self.current_path and self.goal_location:
+            # Check if current waypoint is reached
+            if self.current_waypoint_index < len(self.current_path):
+                current_waypoint = self.current_path[self.current_waypoint_index]
+                distance = math.hypot(
+                    position.x - current_waypoint[0],
+                    position.y - current_waypoint[1]
+                )
+
+                if distance < self.WAYPOINT_THRESHOLD:
+                    # Waypoint reached, advance to next
+                    self.current_waypoint_index += 1
+                    self.get_logger().info(f'Waypoint {self.current_waypoint_index - 1} reached')
+
+                    # Publish next waypoint
+                    if self.current_waypoint_index < len(self.current_path):
+                        next_waypoint = self.current_path[self.current_waypoint_index]
+                        point_msg = Point()
+                        point_msg.x, point_msg.y = next_waypoint[0], next_waypoint[1]
+                        point_msg.z = 0.0
+                        self.publisher_next.publish(point_msg)
+                        self.get_logger().info(f'Next waypoint published: ({point_msg.x}, {point_msg.y})')
+                    else:
+                        # Goal reached
+                        self.get_logger().info('Goal reached!')
+                        self.current_path = None
+                        self.current_waypoint_index = 0
 
     def goal_callback(self, msg):
         # Check for NaN goal (all goals reached)
         if math.isnan(msg.x) or math.isnan(msg.y):
-            # self.goal_location = None
-            # self.get_logger().info('All goals reached: stopping path planning.')
             # Publish NaN to /next_location/point so controller can stop
             none_point = Point(x=math.nan, y=math.nan, z=math.nan)
             self.publisher_next.publish(none_point)
+            self.current_path = None
+            self.goal_location = None
             return
-        self.goal_location = (msg.x, msg.y)
+        if (round(msg.x,1), round(msg.y,1)) == self.goal_location:
+            return  # Same goal as before, ignore
+        self.goal_location = (round(msg.x, 1), round(msg.y, 1))
+        self.get_logger().info(f'New goal received: {self.goal_location}')
+
+        # Stop the robot for 5 seconds before planning
+        if self.current_location:
+            self.stop_robot()
+            self.get_logger().info('Stopping for 5 seconds before planning path to new goal...')
+            time.sleep(5.0)
+            # Plan initial path to the goal
+            self.plan_path()
         
 
     def obstacles_callback(self, msg):
         """
-        Convert PointCloud2 message to a set of (x, y) tuples
+        Convert PointCloud2 message to a set of (x, y) tuples and check for path collisions
         """
-
-        # Extract point data from the PointCloud2 message
-        # The message has fields x, y (each 4 bytes, float32)
-        # Note: derez_lidar packs 3 floats (x, y, z=0.0) but only defines 2 fields
-        # So we need to unpack based on the actual packed data (12 bytes per point)
-        point_step = 8  # 3 floats * 4 bytes each (x, y, z)
+        point_step = 8  # 2 floats * 4 bytes each (x, y)
 
         # Iterate through the point cloud data
         new_obs = set()
@@ -116,37 +132,107 @@ class SearchNode(Node):
             # Calculate the byte offset for this point
             offset = i * point_step
 
-            # Unpack x, y, z values (we only need x and y)
+            # Unpack x, y values
             x, y = struct.unpack_from('ff', msg.data, offset)
 
             # Add (x, y) tuple to the set
             new_obs.add((round(x, 1), round(y, 1)))
+
         self.obstacles = new_obs
 
-        
-        # if self.flag == True:
-        self.get_logger().info(f'Obstacles: {self.obstacles}')
-            # self.flag = False
+        # Check if existing path collides with new obstacles
+        if self.current_path and self.goal_location and not self.is_planning:
+            if self.path_has_collision():
+                self.get_logger().warn('Path collision detected! Stopping robot and replanning...')
+                # Stop the robot immediately
+                self.stop_robot()
+                # Start replanning
+                self.plan_path()
 
 
-    def plan_and_publish(self):
+    def path_has_collision(self):
+        """
+        Check if the remaining path (from current waypoint onwards) collides with obstacles.
+        Uses the same inflation logic as A* for consistency.
+        """
+        if not self.current_path or self.current_waypoint_index >= len(self.current_path):
+            return False
 
-        if self.current_location and self.goal_location and self.obstacles is not None:
-            path = self.astar(self.current_location, self.goal_location, self.obstacles, resolution=0.1)
-            self.get_logger().info(f'Current: {self.current_location}, Goal: {self.goal_location}, Path: {path}')
-            
-            if path is None:
-                self.get_logger().warn('No path found to goal!')
-                self.publisher_next.publish(Point(x=0., y=0., z=0.0))
-                return
-                
-            if len(path) > 1:
-                next_point = path[1]  # Next point in the path
-                point_msg = Point()
-                point_msg.x, point_msg.y = round(next_point[0],1), round(next_point[1],1)
-                point_msg.z = 0.0
-                self.publisher_next.publish(point_msg)
-                self.get_logger().info(f'Next point published: ({point_msg.x}, {point_msg.y})')
+        # Get inflated obstacles (same as in A* planning)
+        resolution = 0.1
+
+        def to_grid(p):
+            return (int(round(p[0] / resolution)), int(round(p[1] / resolution)))
+
+        # Inflate obstacles by 1 cell in grid space
+        inflated_obstacles = set()
+        for (x, y) in self.obstacles:
+            cx, cy = to_grid((x, y))
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    inflated_obstacles.add((cx + dx, cy + dy))
+
+        # Check remaining path points
+        for i in range(self.current_waypoint_index, len(self.current_path)):
+            waypoint = self.current_path[i]
+            grid_pos = to_grid(waypoint)
+
+            # Check if waypoint is in inflated obstacle area
+            if grid_pos in inflated_obstacles:
+                # Don't consider goal collision to allow reaching goal even if near obstacle
+                if waypoint == self.goal_location:
+                    continue
+                return True
+
+        return False
+
+    def stop_robot(self):
+        """
+        Publish current location as target to make the robot stop
+        """
+        if self.current_location:
+            stop_point = Point()
+            stop_point.x, stop_point.y = math.nan, math.nan
+            stop_point.z = math.nan
+            self.publisher_next.publish(stop_point)
+            self.get_logger().info('Robot stopped for replanning')
+
+    def plan_path(self):
+        """
+        Plan a path from current location to goal using A* and publish first waypoint
+        """
+        if not self.current_location or not self.goal_location:
+            return
+
+        # Set planning flag to prevent concurrent replanning
+        self.is_planning = True
+        self.get_logger().info(f'Path planning started: Current={self.current_location}, Goal={self.goal_location}')
+
+        path = self.astar(self.current_location, self.goal_location, self.obstacles, resolution=0.1)
+
+        if path is None:
+            self.get_logger().warn('No path found to goal!')
+            self.current_path = None
+            self.current_waypoint_index = 0
+            self.is_planning = False
+            return
+
+        self.current_path = path
+        self.current_waypoint_index = 0
+        self.get_logger().info(f'Path found with {len(path)} waypoints')
+
+        # Publish first waypoint (skip index 0 as it's the current location)
+        if len(path) > 1:
+            self.current_waypoint_index = 1
+            next_point = path[1]
+            point_msg = Point()
+            point_msg.x, point_msg.y = next_point[0], next_point[1]
+            point_msg.z = 0.0
+            self.publisher_next.publish(point_msg)
+            self.get_logger().info(f'First waypoint published: ({point_msg.x}, {point_msg.y}) - Robot resuming motion')
+
+        # Clear planning flag
+        self.is_planning = False
 
     def astar(self, start, goal, obstacles, resolution):
         """
