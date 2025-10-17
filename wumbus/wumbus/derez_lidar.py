@@ -151,9 +151,9 @@ class DerezLidar(Node):
         self.transformed_points = set(transformed_points)
         
         
-        # if self.flag == True:
-        #     self.get_logger().info(f'Transformed points: {self.transformed_points}')
-        #     self.flag = False
+        if self.flag == True:
+            self.get_logger().info(f'Transformed points: {self.transformed_points}')
+            self.flag = False
 
         # Create and publish PointCloud2 message
         pointcloud_msg = self.create_pointcloud2(self.transformed_points, msg.header.stamp)
