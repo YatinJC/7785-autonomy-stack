@@ -110,6 +110,9 @@ class SearchNode(Node):
             self.get_logger().info('Same goal as before, ignoring.')
             return  # Same goal as before, ignore
         
+        if self.current_location is None:
+            self.get_logger().warn('Current location unknown, cannot plan path to goal yet.')
+            return
         
         self.goal_location = (round(msg.x, 1), round(msg.y, 1))
         self.get_logger().info(f'New goal received: {self.goal_location}')
