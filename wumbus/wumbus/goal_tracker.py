@@ -18,9 +18,9 @@ class GoalTracker(Node):
 
         # Define 3 goals (x, y)
         self.goals = [
-            Point(x=1.5, y=0.0, z=0.0),
-            Point(x=1.5, y=1.4, z=0.0),
-            Point(x=0.0, y=1.4, z=0.0)
+            Point(x=.45, y=0.0, z=0.0),
+            Point(x=-.3, y=.9, z=0.0),
+            Point(x=0.0, y=0.0, z=0.0)
         ]
 
         self.goal_index = 0  # start with first goal

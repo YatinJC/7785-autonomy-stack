@@ -13,8 +13,8 @@ class ControllerNode(Node):
     k1 = 2.  # Proportional gain (linear velocity)
     k2 = 5.  # Proportional gain (angular velocity)
     
-    MAX_LINEAR_VELOCITY = .1
-    MAX_ANGULAR_VELOCITY = 1.0
+    MAX_LINEAR_VELOCITY = .2
+    MAX_ANGULAR_VELOCITY = 2.
     MIN_LINEAR_VELOCITY = -MAX_LINEAR_VELOCITY
     MIN_ANGULAR_VELOCITY = -MAX_ANGULAR_VELOCITY
     THRESHOLD_DIST = 0.05  # Stop if within 5cm of target
@@ -26,12 +26,14 @@ class ControllerNode(Node):
         self.create_subscription(Odometry, '/odom_corrected', self.odom_callback, 10)
         # Subscribe to the next location as a bare Point (x,y). The SearchNode publishes a Point.
         self.create_subscription(Point, '/next_location/point', self.point_callback, 10)
-        self.flag = True
 
         # Current position and orientation from corrected odometry
         self.globalPos = Point()
         self.globalAng = 0.0
         self.target_point = None
+
+        # Flag to log target only once per new target
+        self.target_logged = False
      
         self.get_logger().info('Controller Node started')
 
@@ -55,8 +57,8 @@ class ControllerNode(Node):
         # Assign directly instead of accessing `msg.point` which would be present
         # if this were a PointStamped or a custom message.
         self.target_point = msg
-        # self.get_logger().info(f'New target point received: ({msg.x}, {msg.y})')
-        # self.control_loop()
+        # Reset flag when new target is received
+        self.target_logged = False
 
     def control_loop(self):
         # Handle NaN target point (all goals reached)
@@ -65,19 +67,21 @@ class ControllerNode(Node):
             twist.linear.x = 0.0
             twist.angular.z = 0.0
             self.cmd_pub.publish(twist)
-            self.get_logger().info('All goals reached: stopping robot.')
+            # self.get_logger().info('All goals reached: stopping robot.')
             return
         # Get current position and orientation
         x = self.globalPos.x
         y = self.globalPos.y
-        # if self.flag == True:
-        #     self.get_logger().info(f'Current position: ({x}, {y}), orientation: {self.globalAng}')
         theta = self.globalAng
+
         # Target position
         tx = self.target_point.x
         ty = self.target_point.y
-        if self.flag == True:
+
+        # Log target position once when it's first received
+        if not self.target_logged:
             self.get_logger().info(f'Target position: ({tx}, {ty})')
+            self.target_logged = True
         # Compute error
         dx = tx - x
         dy = ty - y

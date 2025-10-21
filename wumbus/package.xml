@@ -3,20 +3,30 @@
 <package format="3">
   <name>wumbus</name>
   <version>0.0.0</version>
-  <description>Wumbus autonomous navigation package</description>
+  <description>
+    Wumbus autonomous navigation package for TurtleBot3.
+    Includes odometry correction with ICP, LiDAR processing,
+    global frame transformation, A* path planning, and velocity control.
+  </description>
   <maintainer email="ychandar3@gatech.edu">yc</maintainer>
   <license>Apache-2.0</license>
 
+  <!-- Build and test dependencies -->
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
 
+  <!-- ROS 2 core dependencies -->
   <depend>rclpy</depend>
+
+  <!-- Message dependencies -->
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>std_msgs</depend>
+
+  <!-- Transform dependencies -->
   <depend>tf2_ros</depend>
 
   <export>

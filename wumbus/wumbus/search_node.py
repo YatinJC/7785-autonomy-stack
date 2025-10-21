@@ -107,7 +107,7 @@ class SearchNode(Node):
             self.goal_location = None
             return
         if (round(msg.x,1), round(msg.y,1)) == self.goal_location:
-            self.get_logger().info('Same goal as before, ignoring.')
+            # self.get_logger().info('Same goal as before, ignoring.')
             return  # Same goal as before, ignore
         
         if self.current_location is None:
@@ -117,11 +117,11 @@ class SearchNode(Node):
         self.goal_location = (round(msg.x, 1), round(msg.y, 1))
         self.get_logger().info(f'New goal received: {self.goal_location}')
 
-        # Stop the robot for 5 seconds before planning
+        # Stop the robot for 2 seconds before planning
         if self.current_location:
             self.stop_robot()
-            self.get_logger().info('Stopping for 5 seconds before planning path to new goal...')
-            time.sleep(5.0)
+            self.get_logger().info('Stopping for 2 seconds before planning path to new goal...')
+            time.sleep(2.0)
             # Plan initial path to the goal
             self.plan_path()
             self.get_logger().info('Path planning to new goal completed.')
