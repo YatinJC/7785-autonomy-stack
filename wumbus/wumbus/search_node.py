@@ -3,10 +3,11 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Point
+from nav_msgs.msg import Odometry, Path
+from geometry_msgs.msg import Point, PoseStamped
 from std_msgs.msg import Header
 from sensor_msgs.msg import PointCloud2
+from visualization_msgs.msg import Marker
 import struct
 import numpy as np
 import math
@@ -14,7 +15,7 @@ import heapq
 import time
 
 class SearchNode(Node):
-    WAYPOINT_THRESHOLD = 0.05  # Distance threshold to consider waypoint reached
+    WAYPOINT_THRESHOLD = 0.15  # Distance threshold to consider waypoint reached (increased for reliability)
 
     def __init__(self):
         super().__init__('search_node')
@@ -59,6 +60,18 @@ class SearchNode(Node):
             Point,
             '/next_location/point',
             10)
+
+        # Publishers for visualization
+        self.path_viz_pub = self.create_publisher(
+            Path,
+            '/planned_path',
+            10)
+
+        self.current_waypoint_pub = self.create_publisher(
+            Marker,
+            '/current_waypoint_marker',
+            10)
+
         self.get_logger().info('Search Node started')
 
     def odom_callback(self, msg):
@@ -67,7 +80,6 @@ class SearchNode(Node):
         """
         position = msg.pose.pose.position
         self.current_location = (round(position.x, 1), round(position.y, 1))
-        self.get_logger().info(f'Current location updated: {self.current_location}')
         # Check if we need to advance to the next waypoint or replan
         if self.current_path and self.goal_location:
             # Check if current waypoint is reached
@@ -76,6 +88,13 @@ class SearchNode(Node):
                 distance = math.hypot(
                     position.x - current_waypoint[0],
                     position.y - current_waypoint[1]
+                )
+
+                self.get_logger().debug(
+                    f'Waypoint tracking: current={self.current_waypoint_index}/{len(self.current_path)}, '
+                    f'target=({current_waypoint[0]:.2f}, {current_waypoint[1]:.2f}), '
+                    f'robot=({position.x:.2f}, {position.y:.2f}), dist={distance:.3f}m',
+                    throttle_duration_sec=0.5
                 )
 
                 if distance < self.WAYPOINT_THRESHOLD:
@@ -91,11 +110,16 @@ class SearchNode(Node):
                         point_msg.z = 0.0
                         self.publisher_next.publish(point_msg)
                         self.get_logger().info(f'Next waypoint published: ({point_msg.x}, {point_msg.y})')
+                        # Update visualization
+                        self.publish_path_visualization()
+                        self.publish_current_waypoint_marker(next_waypoint)
                     else:
                         # Goal reached
                         self.get_logger().info('Goal reached!')
                         self.current_path = None
                         self.current_waypoint_index = 0
+                        # Clear visualization
+                        self.clear_path_visualization()
 
     def goal_callback(self, msg):
         # Check for NaN goal (all goals reached)
@@ -166,7 +190,7 @@ class SearchNode(Node):
             return False
 
         # Get inflated obstacles (same as in A* planning)
-        resolution = 0.1
+        resolution = 0.0
 
         def to_grid(p):
             return (int(round(p[0] / resolution)), int(round(p[1] / resolution)))
@@ -215,7 +239,7 @@ class SearchNode(Node):
         self.is_planning = True
         self.get_logger().info(f'Path planning started: Current={self.current_location}, Goal={self.goal_location}')
 
-        path = self.astar(self.current_location, self.goal_location, self.obstacles, resolution=0.1)
+        path = self.astar(self.current_location, self.goal_location, self.obstacles, resolution=0.05)
 
         if path is None:
             self.get_logger().warn('No path found to goal!')
@@ -226,7 +250,11 @@ class SearchNode(Node):
 
         self.current_path = path
         self.current_waypoint_index = 0
-        self.get_logger().info(f'Path found with {len(path)} waypoints')
+        self.get_logger().info(f'Path found with {len(path)} waypoints:')
+        for i, wp in enumerate(path[:min(5, len(path))]):  # Show first 5 waypoints
+            self.get_logger().info(f'  Waypoint {i}: ({wp[0]:.2f}, {wp[1]:.2f})')
+        if len(path) > 5:
+            self.get_logger().info(f'  ... and {len(path) - 5} more waypoints')
 
         # Publish first waypoint (skip index 0 as it's the current location)
         if len(path) > 1:
@@ -237,6 +265,10 @@ class SearchNode(Node):
             point_msg.z = 0.0
             self.publisher_next.publish(point_msg)
             self.get_logger().info(f'First waypoint published: ({point_msg.x}, {point_msg.y}) - Robot resuming motion')
+
+            # Publish path visualization
+            self.publish_path_visualization()
+            self.publish_current_waypoint_marker(next_point)
 
         # Clear planning flag
         self.is_planning = False
@@ -368,6 +400,81 @@ class SearchNode(Node):
                     heapq.heappush(open_heap, (tentative_g + hn, hn, n))
 
         return None
+
+    def publish_path_visualization(self):
+        """
+        Publish the current planned path as a Path message for RViz visualization
+        """
+        if not self.current_path or len(self.current_path) == 0:
+            return
+
+        path_msg = Path()
+        path_msg.header.frame_id = "odom_corrected"
+        path_msg.header.stamp = self.get_clock().now().to_msg()
+
+        # Add all waypoints from current waypoint onwards
+        for i in range(self.current_waypoint_index, len(self.current_path)):
+            waypoint = self.current_path[i]
+            pose = PoseStamped()
+            pose.header.frame_id = "odom_corrected"
+            pose.header.stamp = self.get_clock().now().to_msg()
+            pose.pose.position.x = waypoint[0]
+            pose.pose.position.y = waypoint[1]
+            pose.pose.position.z = 0.05  # Slightly above ground
+            pose.pose.orientation.w = 1.0
+            path_msg.poses.append(pose)
+
+        self.path_viz_pub.publish(path_msg)
+        self.get_logger().debug(f'Published path with {len(path_msg.poses)} waypoints')
+
+    def clear_path_visualization(self):
+        """
+        Clear the path visualization by publishing an empty path
+        """
+        path_msg = Path()
+        path_msg.header.frame_id = "odom_corrected"
+        path_msg.header.stamp = self.get_clock().now().to_msg()
+        self.path_viz_pub.publish(path_msg)
+
+        # Clear waypoint marker
+        marker = Marker()
+        marker.header.frame_id = "odom_corrected"
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "current_waypoint"
+        marker.id = 0
+        marker.action = Marker.DELETE
+        self.current_waypoint_pub.publish(marker)
+
+    def publish_current_waypoint_marker(self, waypoint):
+        """
+        Publish a marker for the current waypoint target
+        """
+        marker = Marker()
+        marker.header.frame_id = "odom_corrected"
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "current_waypoint"
+        marker.id = 0
+        marker.type = Marker.CYLINDER
+        marker.action = Marker.ADD
+
+        marker.pose.position.x = waypoint[0]
+        marker.pose.position.y = waypoint[1]
+        marker.pose.position.z = 0.05
+        marker.pose.orientation.w = 1.0
+
+        marker.scale.x = 0.1
+        marker.scale.y = 0.1
+        marker.scale.z = 0.1
+
+        # Cyan color for current waypoint
+        marker.color.r = 0.0
+        marker.color.g = 1.0
+        marker.color.b = 1.0
+        marker.color.a = 0.8
+
+        marker.lifetime.sec = 0  # Persistent
+
+        self.current_waypoint_pub.publish(marker)
 
 def main(args=None):
     rclpy.init(args=args)

@@ -3,11 +3,28 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
+from launch import conditions
 
 
 def generate_launch_description():
+    # Get the path to the RViz config file
+    rviz_config_file = PathJoinSubstitution([
+        FindPackageShare('wumbus'),
+        'config',
+        'wumbus.rviz'
+    ])
+
+    # Launch argument for enabling/disabling RViz
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz',
+        default_value='true',
+        description='Launch RViz for visualization'
+    )
+
     return LaunchDescription([
+        use_rviz_arg,
 
         # Odometry correction node - corrects raw odometry using wheel encoders + ICP
         # Subscribes to: /odom, /derez_lidar_base/PointCloud2
@@ -73,5 +90,27 @@ def generate_launch_description():
             name='controller',
             output='screen',
             parameters=[],
+        ),
+
+        # Mapper node - builds occupancy grid map from LiDAR observations
+        # Subscribes to: /obstacle_points/PointCloud2, /odom_corrected
+        # Publishes to: /map
+        Node(
+            package='wumbus',
+            executable='mapper',
+            name='mapper',
+            output='screen',
+            parameters=[],
+        ),
+
+        # RViz node - visualization
+        # Displays: map, goals, path, LiDAR, robot model
+        Node(
+            package='rviz2',
+            executable='rviz2',
+            name='rviz2',
+            output='screen',
+            arguments=['-d', rviz_config_file],
+            condition=conditions.IfCondition(LaunchConfiguration('use_rviz'))
         ),
     ])

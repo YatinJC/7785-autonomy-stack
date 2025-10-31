@@ -176,8 +176,9 @@ class DerezLidar(Node):
             x_base = scan_offset_x + x_scan * math.cos(scan_offset_yaw) - y_scan * math.sin(scan_offset_yaw)
             y_base = scan_offset_y + x_scan * math.sin(scan_offset_yaw) + y_scan * math.cos(scan_offset_yaw)
 
-            x_rounded = round(x_base, 1)
-            y_rounded = round(y_base, 1)
+            #round to nearest .01
+            x_rounded = round(x_base * 100) / 100
+            y_rounded = round(y_base * 100) / 100
 
             transformed_points.append((x_rounded, y_rounded))
 

@@ -10,14 +10,20 @@ import numpy as np
 
 
 class ControllerNode(Node):
-    k1 = 2.  # Proportional gain (linear velocity)
-    k2 = 5.  # Proportional gain (angular velocity)
-    
-    MAX_LINEAR_VELOCITY = .2
-    MAX_ANGULAR_VELOCITY = 2.
+    # Pure Pursuit parameters
+    LOOKAHEAD_DISTANCE = 0.25  # How far ahead to look on the path (meters)
+    MIN_LOOKAHEAD = 0.15  # Minimum lookahead distance
+    MAX_LOOKAHEAD = 0.4  # Maximum lookahead distance
+
+    # Control parameters
+    BASE_LINEAR_VELOCITY = 0.15  # Target forward velocity
+    MAX_LINEAR_VELOCITY = 0.2
+    MAX_ANGULAR_VELOCITY = 2.0
     MIN_LINEAR_VELOCITY = -MAX_LINEAR_VELOCITY
     MIN_ANGULAR_VELOCITY = -MAX_ANGULAR_VELOCITY
-    THRESHOLD_DIST = 0.05  # Stop if within 5cm of target
+
+    # Angular velocity gain
+    k_angular = 2.5
 
     def __init__(self):
         super().__init__('controller')
@@ -34,8 +40,8 @@ class ControllerNode(Node):
 
         # Flag to log target only once per new target
         self.target_logged = False
-     
-        self.get_logger().info('Controller Node started')
+
+        self.get_logger().info('Controller Node started (Pure Pursuit)')
 
     def odom_callback(self, msg):
         """
@@ -67,8 +73,8 @@ class ControllerNode(Node):
             twist.linear.x = 0.0
             twist.angular.z = 0.0
             self.cmd_pub.publish(twist)
-            # self.get_logger().info('All goals reached: stopping robot.')
             return
+
         # Get current position and orientation
         x = self.globalPos.x
         y = self.globalPos.y
@@ -80,29 +86,80 @@ class ControllerNode(Node):
 
         # Log target position once when it's first received
         if not self.target_logged:
-            self.get_logger().info(f'Target position: ({tx}, {ty})')
+            self.get_logger().info(f'New target: ({tx:.2f}, {ty:.2f})')
             self.target_logged = True
-        # Compute error
+
+        # Calculate distance to target
         dx = tx - x
         dy = ty - y
         distance = math.sqrt(dx**2 + dy**2)
-        target_theta = math.atan2(dy, dx)
-        normalized_angle = self.normalize_angle(target_theta - theta)
-        
-        # Proportional control
-        v = self.k1 * distance
-        w = self.k2 * normalized_angle
-        # Limit velocities
-        v = max(min(v, self.MAX_LINEAR_VELOCITY), self.MIN_LINEAR_VELOCITY)
+
+        # Pure Pursuit Algorithm
+        # 1. Calculate lookahead distance (adaptive based on distance to goal)
+        lookahead = min(max(distance * 0.5, self.MIN_LOOKAHEAD), self.MAX_LOOKAHEAD)
+
+        # 2. Find the lookahead point
+        # For a single waypoint, use the target if we're close, otherwise use lookahead point
+        if distance <= lookahead:
+            # Close to target, aim directly at it
+            lookahead_x = tx
+            lookahead_y = ty
+        else:
+            # Use a point along the line from current position to target at lookahead distance
+            direction = math.atan2(dy, dx)
+            lookahead_x = x + lookahead * math.cos(direction)
+            lookahead_y = y + lookahead * math.sin(direction)
+
+        # 3. Transform lookahead point to robot frame
+        dx_robot = lookahead_x - x
+        dy_robot = lookahead_y - y
+
+        # Rotate to robot's local frame
+        dx_local = dx_robot * math.cos(-theta) - dy_robot * math.sin(-theta)
+        dy_local = dx_robot * math.sin(-theta) + dy_robot * math.cos(-theta)
+
+        # 4. Calculate curvature (steering) using Pure Pursuit formula
+        # curvature = 2 * dy_local / lookahead^2
+        lookahead_dist_actual = math.sqrt(dx_local**2 + dy_local**2)
+        if lookahead_dist_actual < 0.01:
+            curvature = 0.0
+        else:
+            curvature = 2.0 * dy_local / (lookahead_dist_actual ** 2)
+
+        # 5. Calculate velocities
+        # Linear velocity: constant when far, slow down when close
+        if distance > 0.3:
+            v = self.BASE_LINEAR_VELOCITY
+        else:
+            # Slow down smoothly as we approach
+            v = self.BASE_LINEAR_VELOCITY * (distance / 0.3)
+            v = max(v, 0.05)  # Minimum velocity to keep moving
+
+        # Angular velocity: proportional to curvature
+        w = curvature * v * self.k_angular
+
+        # 6. Limit velocities
+        v = max(min(v, self.MAX_LINEAR_VELOCITY), 0.0)  # No backward motion
         w = max(min(w, self.MAX_ANGULAR_VELOCITY), self.MIN_ANGULAR_VELOCITY)
-        # Publish Twist
-        if normalized_angle > math.pi/4 or normalized_angle < -math.pi/4:
+
+        # 7. If target is behind us (angle > 90 degrees), just rotate in place
+        angle_to_target = math.atan2(dy, dx)
+        angle_diff = self.normalize_angle(angle_to_target - theta)
+        if abs(angle_diff) > math.pi / 2:
             v = 0.0
+            w = self.k_angular * angle_diff
+
+        # Publish Twist
         twist = Twist()
         twist.linear.x = v
         twist.angular.z = w
         self.cmd_pub.publish(twist)
-        self.get_logger().info(f'Cmd published: linear.x={v:.2f}, angular.z={w:.2f}, distance to target={distance:.2f}, angle error={normalized_angle:.2f}')
+
+        self.get_logger().info(
+            f'Pure Pursuit: v={v:.2f}, w={w:.2f} | '
+            f'dist={distance:.3f}m, lookahead={lookahead:.2f}m, curv={curvature:.2f}',
+            throttle_duration_sec=0.5
+        )
 
     def normalize_angle(self, angle):
         while angle > math.pi:
