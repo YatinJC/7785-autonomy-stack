@@ -5,12 +5,12 @@ from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 from sensor_msgs.msg import LaserScan, CompressedImage
 from nav_msgs.msg import Odometry
+from rclpy.qos import qos_profile_sensor_data
 import math
 import numpy as np
 import time
 import cv2
 from cv_bridge import CvBridge
-from rclpy.qos import qos_profile_sensor_data
 
 class AiDriver(Node):
     def __init__(self):
@@ -22,6 +22,7 @@ class AiDriver(Node):
         self.turn_tolerance = 0.1  # radians
         self.obstacle_dist = 0.5   # meters
         self.center_tolerance = 0.05 # Normalized image x tolerance
+        self.wall_follow_gain = 1.0 # Gain for wall following
         
         # State
         self.state = 'DRIVING'  # DRIVING, CENTERING, CLASSIFYING, TURNING, STOPPED, FINISHED
@@ -59,7 +60,7 @@ class AiDriver(Node):
         # Control Loop
         self.create_timer(0.1, self.control_loop)
         
-        self.get_logger().info('AI Driver initialized with Color-Based Centering')
+        self.get_logger().info('AI Driver initialized with Wall Following & Visual Centering')
 
     def sign_callback(self, msg):
         self.last_sign = msg.data
@@ -88,14 +89,11 @@ class AiDriver(Node):
             # Process for sign centroid (Red, Blue, or Green signs)
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
             
-            # Define color ranges (OpenCV HSV: H=0-179, S=0-255, V=0-255)
-            
-            # Blue (Left/Right) ~100-140
+            # Define color ranges
             lower_blue = np.array([100, 100, 50])
             upper_blue = np.array([140, 255, 255])
             mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
             
-            # Red (Stop/Do Not Enter) ~0-10 and ~170-180
             lower_red1 = np.array([0, 100, 50])
             upper_red1 = np.array([10, 255, 255])
             lower_red2 = np.array([170, 100, 50])
@@ -103,7 +101,6 @@ class AiDriver(Node):
             mask_red = cv2.bitwise_or(cv2.inRange(hsv, lower_red1, upper_red1), 
                                       cv2.inRange(hsv, lower_red2, upper_red2))
             
-            # Green (Goal) ~40-80
             lower_green = np.array([40, 100, 50])
             upper_green = np.array([80, 255, 255])
             mask_green = cv2.inRange(hsv, lower_green, upper_green)
@@ -138,13 +135,11 @@ class AiDriver(Node):
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
             if contours:
-                # Largest blob is likely the sign
                 largest = max(contours, key=cv2.contourArea)
-                if cv2.contourArea(largest) > 500: # Min area noise filter
+                if cv2.contourArea(largest) > 500:
                     M = cv2.moments(largest)
                     if M["m00"] != 0:
                         cx = int(M["m10"] / M["m00"])
-                        # Normalize to -1.0 (left) to 1.0 (right)
                         self.sign_centroid_x = (2.0 * cx / self.image_width) - 1.0
                     else:
                         self.sign_centroid_x = None
@@ -169,6 +164,33 @@ class AiDriver(Node):
         self.target_yaw = self.normalize_angle(self.current_yaw + angle_rad)
         self.get_logger().info(f'Starting turn: {angle_deg} deg')
 
+    def get_scan_ranges(self):
+        if not self.scan_data:
+            return None, None, None
+            
+        ranges = np.array(self.scan_data.ranges)
+        ranges[ranges == float('inf')] = 10.0
+        ranges[np.isnan(ranges)] = 10.0
+        
+        # Front: +/- 15 deg
+        n = len(ranges)
+        window_front = int(n / 24) 
+        front_ranges = np.concatenate((ranges[-window_front:], ranges[:window_front]))
+        min_front = np.min(front_ranges)
+        
+        # Left: 90 deg +/- 15 deg
+        idx_left = int(n * 0.25) # 90 deg
+        window_side = int(n / 24)
+        left_ranges = ranges[idx_left-window_side : idx_left+window_side]
+        min_left = np.min(left_ranges) if len(left_ranges) > 0 else 10.0
+        
+        # Right: 270 deg (-90) +/- 15 deg
+        idx_right = int(n * 0.75) # 270 deg
+        right_ranges = ranges[idx_right-window_side : idx_right+window_side]
+        min_right = np.min(right_ranges) if len(right_ranges) > 0 else 10.0
+        
+        return min_front, min_left, min_right
+
     def control_loop(self):
         twist = Twist()
         
@@ -178,27 +200,50 @@ class AiDriver(Node):
             self.cmd_pub.publish(twist)
             return
 
-        # 1. DRIVING
+        # 1. DRIVING (with Wall Following)
         if self.state == 'DRIVING':
-            # Check for obstacles
-            if self.scan_data:
-                # Check front cone
-                ranges = np.array(self.scan_data.ranges)
-                ranges[ranges == float('inf')] = 10.0
-                n = len(ranges)
-                window = int(n / 12) # +/- 30 deg
-                front_ranges = np.concatenate((ranges[-window:], ranges[:window]))
-                min_dist = np.min(front_ranges)
-                
-                if min_dist < self.obstacle_dist:
-                    self.get_logger().warn(f'Wall detected ({min_dist:.2f}m). Switching to CENTERING.')
+            min_front, min_left, min_right = self.get_scan_ranges()
+            
+            if min_front is not None:
+                # Obstacle Avoidance / Sign Detection Trigger
+                if min_front < self.obstacle_dist:
+                    self.get_logger().warn(f'Wall detected ({min_front:.2f}m). Switching to CENTERING.')
                     self.state = 'CENTERING'
                     twist.linear.x = 0.0
                     self.cmd_pub.publish(twist)
                     return
                 
-            # Drive forward
-            twist.linear.x = self.linear_speed
+                # Wall Following Logic
+                twist.linear.x = self.linear_speed
+                
+                # Target distance from wall (e.g., 0.5m)
+                target_dist = 0.5
+                
+                # If both walls are seen, center between them
+                if min_left < 2.0 and min_right < 2.0:
+                    error = min_left - min_right
+                    # If left > right, error > 0, need to turn left (positive z) to center? 
+                    # No, if left is big, we are too far right. Turn Left.
+                    twist.angular.z = self.wall_follow_gain * error
+                    
+                # If only left wall
+                elif min_left < 2.0:
+                    error = target_dist - min_left
+                    # If dist < target (too close), error > 0. Need to turn Right (negative z).
+                    twist.angular.z = -self.wall_follow_gain * error
+                    
+                # If only right wall
+                elif min_right < 2.0:
+                    error = target_dist - min_right
+                    # If dist < target (too close), error > 0. Need to turn Left (positive z).
+                    twist.angular.z = self.wall_follow_gain * error
+                    
+                # No walls? Just drive straight
+                else:
+                    twist.angular.z = 0.0
+                    
+                # Clamp angular velocity
+                twist.angular.z = max(min(twist.angular.z, self.angular_speed), -self.angular_speed)
             
         # 2. CENTERING (Visual Servoing)
         elif self.state == 'CENTERING':
