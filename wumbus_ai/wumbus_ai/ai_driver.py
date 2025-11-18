@@ -22,7 +22,7 @@ class AiDriver(Node):
         self.turn_tolerance = 0.1  # radians
         self.obstacle_dist = 0.5   # meters
         self.center_tolerance = 0.05 # Normalized image x tolerance
-        self.wall_follow_gain = -1.0 # Gain for wall following
+        self.wall_follow_gain = 1.0 # Gain for wall following
         
         # State
         self.state = 'DRIVING'  # DRIVING, CENTERING, CLASSIFYING, TURNING, STOPPED, FINISHED
@@ -94,9 +94,9 @@ class AiDriver(Node):
             upper_blue = np.array([140, 255, 255])
             mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
             
-            lower_red1 = np.array([0, 100, 50])
+            lower_red1 = np.array([0, 160, 100])
             upper_red1 = np.array([10, 255, 255])
-            lower_red2 = np.array([170, 100, 50])
+            lower_red2 = np.array([170, 160, 100])
             upper_red2 = np.array([180, 255, 255])
             mask_red = cv2.bitwise_or(cv2.inRange(hsv, lower_red1, upper_red1), 
                                       cv2.inRange(hsv, lower_red2, upper_red2))
