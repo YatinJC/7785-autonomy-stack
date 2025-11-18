@@ -27,6 +27,7 @@ setup(
             'sign_detector = wumbus_ai.sign_detector:main',
             'ai_driver = wumbus_ai.ai_driver:main',
             'img_sub = wumbus_ai.img_sub:main',
+            'test_classifier = wumbus_ai.test_classifier:main',
         ],
     },
 )
