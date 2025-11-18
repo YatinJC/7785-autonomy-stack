@@ -22,7 +22,7 @@ class AiDriver(Node):
         self.turn_tolerance = 0.1  # radians
         self.obstacle_dist = 0.5   # meters
         self.center_tolerance = 0.05 # Normalized image x tolerance
-        self.wall_follow_gain = 1.0 # Gain for wall following
+        self.wall_follow_gain = -1.0 # Gain for wall following
         
         # State
         self.state = 'DRIVING'  # DRIVING, CENTERING, CLASSIFYING, TURNING, STOPPED, FINISHED
