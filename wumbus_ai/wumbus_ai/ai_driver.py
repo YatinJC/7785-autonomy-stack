@@ -10,6 +10,7 @@ import numpy as np
 import time
 import cv2
 from cv_bridge import CvBridge
+from rclpy.qos import qos_profile_sensor_data
 
 class AiDriver(Node):
     def __init__(self):
@@ -49,7 +50,7 @@ class AiDriver(Node):
         
         # Subs/Pubs
         self.create_subscription(String, '/detected_sign', self.sign_callback, 10)
-        self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+        self.create_subscription(LaserScan, '/scan', self.scan_callback, qos_profile_sensor_data)
         self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         self.create_subscription(CompressedImage, '/image_raw/compressed', self.image_callback, 10)
         
