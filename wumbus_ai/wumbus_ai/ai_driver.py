@@ -112,6 +112,23 @@ class AiDriver(Node):
             mask = cv2.bitwise_or(mask_blue, mask_red)
             mask = cv2.bitwise_or(mask, mask_green)
             
+            # Debug logging for color detection
+            if self.state == 'CENTERING':
+                blue_cnts, _ = cv2.findContours(mask_blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                red_cnts, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                green_cnts, _ = cv2.findContours(mask_green, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                max_blue = max([cv2.contourArea(c) for c in blue_cnts]) if blue_cnts else 0
+                max_red = max([cv2.contourArea(c) for c in red_cnts]) if red_cnts else 0
+                max_green = max([cv2.contourArea(c) for c in green_cnts]) if green_cnts else 0
+                
+                if max_blue > 500 or max_red > 500 or max_green > 500:
+                    colors = []
+                    if max_blue > 500: colors.append(f"Blue({int(max_blue)})")
+                    if max_red > 500: colors.append(f"Red({int(max_red)})")
+                    if max_green > 500: colors.append(f"Green({int(max_green)})")
+                    self.get_logger().info(f"Centering on: {', '.join(colors)}")
+            
             # Morphological cleanup
             kernel = np.ones((5,5), np.uint8)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
