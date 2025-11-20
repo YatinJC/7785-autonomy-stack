@@ -119,7 +119,8 @@ class CellCenterController(Node):
         self.turn_target_yaw = 0.0
         self.driving_direction = 0.0  # Direction we were driving before stopping (rad)
         self.facing_wall_reference_theta = None  # Saved orientation when entering NAV_FACING_WALL
-        
+        self.current_sign_future = None
+
         # Subscribers
         self.cell_position_sub = self.create_subscription(
             String,
@@ -349,24 +350,11 @@ class CellCenterController(Node):
         
         # 3. NAV_READING_SIGN: Collect votes using service
         if self.nav_state == ControllerState.NAV_READING_SIGN:
-            # Call sign reading service if buffer not full
-            if len(self.sign_buffer) < 10:
-                # Check if service is available
-                if not self.read_sign_client.service_is_ready():
-                    self.get_logger().warn('Sign reading service not ready, waiting...')
-                    return
-
-                # Create and send request
-                request = ReadSign.Request()
-                future = self.read_sign_client.call_async(request)
-
-                # Wait for result (blocking but quick)
-                import rclpy
-                rclpy.spin_until_future_complete(self, future, timeout_sec=60.0)
-
-                if future.done():
+            # A. If we are actively waiting for a reply, check if it's done
+            if self.current_sign_future is not None:
+                if self.current_sign_future.done():
                     try:
-                        response = future.result()
+                        response = self.current_sign_future.result()
                         if response.success:
                             self.sign_buffer.append(response.class_name)
                             self.get_logger().debug(
@@ -374,13 +362,17 @@ class CellCenterController(Node):
                                 f'(conf: {response.confidence:.2f})'
                             )
                         else:
-                            self.get_logger().warn('Sign reading service call failed')
+                            self.get_logger().warn('Sign reading returned success=False')
                     except Exception as e:
                         self.get_logger().error(f'Service call exception: {e}')
+                    
+                    # Reset future so we can ask again next loop
+                    self.current_sign_future = None
                 else:
-                    self.get_logger().warn('Sign reading service call timed out')
+                    # Still waiting for network, exit and check again next tick
+                    return
 
-            # Process buffer when full
+            # B. If buffer is full, process votes
             if len(self.sign_buffer) >= 10:
                 from collections import Counter
                 counts = Counter(self.sign_buffer)
@@ -409,8 +401,21 @@ class CellCenterController(Node):
                 else:
                     self.get_logger().warn('Saw EMPTY sign. Retrying...')
                     self.sign_buffer = []
+                return
+
+            # C. If we need more votes and aren't waiting, send a new request
+            if len(self.sign_buffer) < 10 and self.current_sign_future is None:
+                if not self.read_sign_client.service_is_ready():
+                    # Only log this occasionally or it will spam
+                    return
+
+                request = ReadSign.Request()
+                # Store the future to check next time!
+                self.current_sign_future = self.read_sign_client.call_async(request)
+            
             return
         
+     
         # 4. NAV_TURNING: Execute turn
         if self.nav_state == ControllerState.NAV_TURNING:
             error = geom.normalize_angle(self.turn_target_yaw - self.current_yaw)
