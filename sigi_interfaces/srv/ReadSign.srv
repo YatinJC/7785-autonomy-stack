@@ -1,0 +1,6 @@
+# Request: trigger sign reading (empty)
+---
+# Response: detected sign information
+string class_name    # The detected sign class (e.g., 'left', 'right', 'stop', etc.)
+float32 confidence   # Confidence score [0.0, 1.0]
+bool success         # Whether inference was successful

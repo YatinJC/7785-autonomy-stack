@@ -18,6 +18,7 @@ import json
 import math
 from enum import Enum
 import numpy as np
+from sigi_interfaces.srv import ReadSign
 
 # Import geometry utilities
 from . import geometry_utils as geom
@@ -112,7 +113,6 @@ class CellCenterController(Node):
         self.centering_start_theta = None  # Saved orientation when entering NAV_CENTERING
         
         # Navigation State Variables
-        self.current_sign = None
         self.sign_buffer: List[str] = []
         self.current_yaw = 0.0
         self.turn_start_yaw = 0.0
@@ -134,20 +134,16 @@ class CellCenterController(Node):
             self.detected_walls_callback,
             10
         )
-        
-        self.sign_sub = self.create_subscription(
-            String,
-            '/detected_sign',
-            self.sign_callback,
-            10
-        )
-        
+
         self.odom_sub = self.create_subscription(
             Odometry,
             '/odom',
             self.odom_callback,
             10
         )
+
+        # Service client for on-demand sign reading
+        self.read_sign_client = self.create_client(ReadSign, '/read_sign')
 
         # QoS profile for sensor data
         sensor_qos = QoSProfile(
@@ -208,11 +204,7 @@ class CellCenterController(Node):
             )
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             self.get_logger().error(f'Failed to parse detected walls: {e}')
-            
-    def sign_callback(self, msg: String):
-        """Process detected sign."""
-        self.current_sign = msg.data
-        
+
     def odom_callback(self, msg: Odometry):
         """Process odometry for precise turning."""
         # Extract yaw from quaternion
@@ -355,19 +347,47 @@ class CellCenterController(Node):
                 self.publish_velocity(0.0, angular_vel)
             return
         
-        # 3. NAV_READING_SIGN: Collect votes
+        # 3. NAV_READING_SIGN: Collect votes using service
         if self.nav_state == ControllerState.NAV_READING_SIGN:
-            # (Existing logic remains the same)
-            if self.current_sign:
-                self.sign_buffer.append(self.current_sign)
-            
+            # Call sign reading service if buffer not full
+            if len(self.sign_buffer) < 10:
+                # Check if service is available
+                if not self.read_sign_client.service_is_ready():
+                    self.get_logger().warn('Sign reading service not ready, waiting...')
+                    return
+
+                # Create and send request
+                request = ReadSign.Request()
+                future = self.read_sign_client.call_async(request)
+
+                # Wait for result (blocking but quick)
+                import rclpy
+                rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
+
+                if future.done():
+                    try:
+                        response = future.result()
+                        if response.success:
+                            self.sign_buffer.append(response.class_name)
+                            self.get_logger().debug(
+                                f'Sign reading {len(self.sign_buffer)}/10: {response.class_name} '
+                                f'(conf: {response.confidence:.2f})'
+                            )
+                        else:
+                            self.get_logger().warn('Sign reading service call failed')
+                    except Exception as e:
+                        self.get_logger().error(f'Service call exception: {e}')
+                else:
+                    self.get_logger().warn('Sign reading service call timed out')
+
+            # Process buffer when full
             if len(self.sign_buffer) >= 10:
                 from collections import Counter
                 counts = Counter(self.sign_buffer)
                 winner, _ = counts.most_common(1)[0]
-                
+
                 self.get_logger().info(f'Sign Vote Result: {dict(counts)} -> Winner: {winner}')
-                
+
                 if winner == 'goal':
                     self.get_logger().info('GOAL REACHED! Stopping.')
                     self.publish_stop()
@@ -376,7 +396,7 @@ class CellCenterController(Node):
                 elif winner in ['left', 'right', 'stop', 'do_not_enter']:
                     self.nav_state = ControllerState.NAV_TURNING
                     self.turn_start_yaw = self.current_yaw
-                    
+
                     # Determine turn target
                     if winner == 'left':
                         self.turn_target_yaw = geom.normalize_angle(self.current_yaw + math.pi/2)
@@ -384,7 +404,7 @@ class CellCenterController(Node):
                         self.turn_target_yaw = geom.normalize_angle(self.current_yaw - math.pi/2)
                     else:
                         self.turn_target_yaw = geom.normalize_angle(self.current_yaw + math.pi)
-                        
+
                     self.get_logger().info(f'Sign action: {winner}. Turning to {np.degrees(self.turn_target_yaw):.1f}°')
                 else:
                     self.get_logger().warn('Saw EMPTY sign. Retrying...')
