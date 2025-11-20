@@ -23,7 +23,7 @@ class CameraProcessor(Node):
         self.declare_parameter('model_path', default_model_path)
         #self.declare_parameter('camera_topic', '/simulated_camera/image_raw') # sim camera
         self.declare_parameter('camera_topic', '/image_raw/compressed') # real camera
-        self.declare_parameter('use_compressed', False)
+        self.declare_parameter('use_compressed', True)
         
         model_path = self.get_parameter('model_path').value
         camera_topic = self.get_parameter('camera_topic').value
