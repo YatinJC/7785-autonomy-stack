@@ -265,11 +265,10 @@ class CellCenterController(Node):
 
         # 1. NAV_CENTERING: Use localization logic to center in the cell
         if self.nav_state == ControllerState.NAV_CENTERING:
-            # Save orientation when first entering centering
             if self.centering_start_theta is None:
                 self.centering_start_theta = self.cell_pos['theta_rad']
                 self.get_logger().info(f'Entering NAV_CENTERING, saved theta: {np.degrees(self.centering_start_theta):.1f}°')
-            # (Existing logic remains the same)
+            
             if has_full_localization:
                 if self.state not in [ControllerState.ROTATING, ControllerState.CENTERING, ControllerState.DONE]:
                     self.state = ControllerState.WAITING
@@ -292,33 +291,28 @@ class CellCenterController(Node):
         
         # 2. NAV_FACING_WALL: Rotate to face the wall
         if self.nav_state == ControllerState.NAV_FACING_WALL:
-            # Use the saved orientation from when we entered this state
             if self.facing_wall_reference_theta is None:
                 self.facing_wall_reference_theta = self.cell_pos['theta_rad']
 
-            # Determine target cardinal based on reference orientation (only once)
             cardinals = [0.0, math.pi/2, math.pi, -math.pi/2]
             target_theta = min(cardinals, key=lambda x: abs(geom.normalize_angle(x - self.facing_wall_reference_theta)))
 
-            # Calculate error using current orientation for control
             current_theta = self.cell_pos['theta_rad']
             error = geom.normalize_angle(target_theta - current_theta)
             
             if abs(error) < self.angle_tolerance:
                 self.publish_stop()
                 
-                # CHECK: Is there actually a wall here?
                 if self._check_wall_in_front():
                     self.get_logger().info(f'Facing wall ({np.degrees(target_theta):.0f}°). Reading sign...')
                     self.nav_state = ControllerState.NAV_READING_SIGN
                     self.sign_buffer = []
+                    self.current_sign_future = None # Ensure future is reset
                 else:
                     self.get_logger().info('Aligned to grid, but no wall. Starting 90° search turn...')
                     self.nav_state = ControllerState.NAV_SEARCHING_WALL
-                    # Set target to 90 degrees LEFT of current orientation
                     self.turn_target_yaw = geom.normalize_angle(self.current_yaw + math.pi/2)
             else:
-                # Standard rotation to face cardinal
                 angular_vel = self.kp_angular * error
                 angular_vel = self.clamp(angular_vel, -self.max_angular_vel, self.max_angular_vel)
                 self.publish_velocity(0.0, angular_vel)
@@ -326,112 +320,88 @@ class CellCenterController(Node):
 
         # 2.5 NAV_SEARCHING_WALL: Turn 90 deg -> Check -> Repeat
         if self.nav_state == ControllerState.NAV_SEARCHING_WALL:
-            # Reuse the turn_target_yaw we set in the previous state
             error = geom.normalize_angle(self.turn_target_yaw - self.current_yaw)
             
             if abs(error) < self.angle_tolerance:
                 self.publish_stop()
-                
-                # 1. The turn is done. NOW we check for the wall.
                 if self._check_wall_in_front():
                     self.get_logger().info('Search turn complete. Wall found! Aligning...')
                     self.nav_state = ControllerState.NAV_FACING_WALL
                     self.facing_wall_reference_theta = self.cell_pos['theta_rad']
                 else:
                     self.get_logger().info('Search turn complete. No wall. turning another 90°...')
-                    # 2. No wall? Add another 90 degrees to the target and keep turning
                     self.turn_target_yaw = geom.normalize_angle(self.turn_target_yaw + math.pi/2)
             else:
-                # Standard P-Control for turning (reuse existing gains)
                 angular_vel = self.kp_angular * error
                 angular_vel = self.clamp(angular_vel, -self.max_angular_vel, self.max_angular_vel)
                 self.publish_velocity(0.0, angular_vel)
             return
         
-        # 3. NAV_READING_SIGN: Collect votes using service
+        # 3. NAV_READING_SIGN: Collect votes using service (ASYNC FIX APPLIED)
         if self.nav_state == ControllerState.NAV_READING_SIGN:
-            # A. If we are actively waiting for a reply, check if it's done
+            # A. Check for pending result
             if self.current_sign_future is not None:
                 if self.current_sign_future.done():
                     try:
                         response = self.current_sign_future.result()
                         if response.success:
                             self.sign_buffer.append(response.class_name)
-                            self.get_logger().debug(
-                                f'Sign reading {len(self.sign_buffer)}/10: {response.class_name} '
-                                f'(conf: {response.confidence:.2f})'
-                            )
-                        else:
-                            self.get_logger().warn('Sign reading returned success=False')
+                            self.get_logger().debug(f'Vote: {response.class_name} ({len(self.sign_buffer)}/10)')
                     except Exception as e:
-                        self.get_logger().error(f'Service call exception: {e}')
-                    
-                    # Reset future so we can ask again next loop
+                        self.get_logger().error(f'Service failed: {e}')
                     self.current_sign_future = None
                 else:
-                    # Still waiting for network, exit and check again next tick
-                    return
+                    return # Keep waiting
 
-            # B. If buffer is full, process votes
+            # B. Process votes if full
             if len(self.sign_buffer) >= 10:
                 from collections import Counter
                 counts = Counter(self.sign_buffer)
                 winner, _ = counts.most_common(1)[0]
-
-                self.get_logger().info(f'Sign Vote Result: {dict(counts)} -> Winner: {winner}')
+                self.get_logger().info(f'Sign Result: {winner}')
 
                 if winner == 'goal':
-                    self.get_logger().info('GOAL REACHED! Stopping.')
+                    self.get_logger().info('GOAL REACHED!')
                     self.publish_stop()
                     self.nav_state = None
                     self.state = ControllerState.DONE
                 elif winner in ['left', 'right', 'stop', 'do_not_enter']:
                     self.nav_state = ControllerState.NAV_TURNING
                     self.turn_start_yaw = self.current_yaw
-
-                    # Determine turn target
                     if winner == 'left':
                         self.turn_target_yaw = geom.normalize_angle(self.current_yaw + math.pi/2)
                     elif winner == 'right':
                         self.turn_target_yaw = geom.normalize_angle(self.current_yaw - math.pi/2)
                     else:
                         self.turn_target_yaw = geom.normalize_angle(self.current_yaw + math.pi)
-
-                    self.get_logger().info(f'Sign action: {winner}. Turning to {np.degrees(self.turn_target_yaw):.1f}°')
                 else:
-                    self.get_logger().warn('Saw EMPTY sign. Retrying...')
+                    # NEW LOGIC: If empty, align parallel and drive
+                    self.get_logger().info('Sign EMPTY. Aligning parallel to wall...')
+                    self.nav_state = ControllerState.NAV_CENTERING
+                    self.state = ControllerState.WAITING
+                    self.centering_start_theta = None
                     self.sign_buffer = []
                 return
 
-            # C. If we need more votes and aren't waiting, send a new request
+            # C. Send new request if needed
             if len(self.sign_buffer) < 10 and self.current_sign_future is None:
-                if not self.read_sign_client.service_is_ready():
-                    # Only log this occasionally or it will spam
-                    return
-
-                request = ReadSign.Request()
-                # Store the future to check next time!
-                self.current_sign_future = self.read_sign_client.call_async(request)
-            
+                if self.read_sign_client.service_is_ready():
+                    self.current_sign_future = self.read_sign_client.call_async(ReadSign.Request())
             return
         
-     
         # 4. NAV_TURNING: Execute turn
         if self.nav_state == ControllerState.NAV_TURNING:
             error = geom.normalize_angle(self.turn_target_yaw - self.current_yaw)
             
             if abs(error) < self.angle_tolerance:
                 self.publish_stop()
-                
-                # LOOP CHECK: Is there a wall immediately in front?
                 if self._check_wall_in_front():
-                    self.get_logger().info('Turn complete. Wall detected immediately in front. Looping to READ SIGN.')
+                    self.get_logger().info('Turn done. Wall in front. Looping to READ SIGN.')
                     self.nav_state = ControllerState.NAV_FACING_WALL
                     self.facing_wall_reference_theta = self.cell_pos['theta_rad']
                 else:
-                    self.get_logger().info('Turn complete. Path clear. Driving...')
+                    self.get_logger().info('Turn done. Path clear. Driving...')
                     self.nav_state = ControllerState.NAV_DRIVING
-                    # Snap driving direction to nearest cardinal for cleaner math
                     cardinals = [0.0, math.pi/2, math.pi, -math.pi/2]
                     self.driving_direction = min(cardinals, key=lambda x: abs(geom.normalize_angle(x - self.turn_target_yaw)))
             else:
@@ -446,29 +416,34 @@ class CellCenterController(Node):
             
             if wall_in_front:
                 self.publish_stop()
-                self.get_logger().info('Wall detected in front. Centering...')
-                self.nav_state = ControllerState.NAV_CENTERING
-                self.state = ControllerState.WAITING
-                self.centering_start_theta = None  # Reset so it gets saved fresh
-            else:
-                # SIMPLIFIED: Heading Control Only
-                # Just keep the robot pointing in the driving_direction.
-                # We ignore lateral (X/Y) error to prevent circling.
                 
+                # NEW LOGIC: Check if we have exactly one wall
+                num_walls = 0
+                if self.walls_data and 'num_walls' in self.walls_data:
+                    num_walls = self.walls_data['num_walls']
+                
+                if num_walls == 1:
+                    self.get_logger().info('Single wall detected. Facing it to read sign...')
+                    self.nav_state = ControllerState.NAV_FACING_WALL
+                    # We are likely hitting it head on, so our current theta is roughly correct reference
+                    self.facing_wall_reference_theta = self.cell_pos['theta_rad']
+                    self.sign_buffer = []
+                    self.current_sign_future = None
+                else:
+                    self.get_logger().info('Wall detected. Centering...')
+                    self.nav_state = ControllerState.NAV_CENTERING
+                    self.state = ControllerState.WAITING
+                    self.centering_start_theta = None
+            else:
+                # Heading Control Only
                 self.target_theta = self.driving_direction
                 current_theta = self.cell_pos['theta_rad']
-                
-                # Calculate simple heading error
                 angular_error = geom.normalize_angle(self.target_theta - current_theta)
-                
-                # Calculate control commands
-                # Note: We removed the lateral_cmd entirely
                 linear_vel = self.wall_follow_speed
-                angular_vel = self.kp_angular * angular_error
-                
-                # Clamp and publish
-                angular_vel = self.clamp(angular_vel, -self.max_angular_vel, self.max_angular_vel)
-                self.publish_velocity(linear_vel, 0)
+                angular_vel = self.clamp(self.kp_angular * angular_error, -self.max_angular_vel, self.max_angular_vel)
+                self.publish_velocity(linear_vel, 0) # Zero angular for straight driving test? 
+                # Revert to using angular_vel if drift is high
+                self.publish_velocity(linear_vel, angular_vel) 
             return
     
     # ========================================================================
