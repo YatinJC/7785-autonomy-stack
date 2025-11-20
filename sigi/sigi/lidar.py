@@ -62,7 +62,7 @@ class lidar_processor(Node):
         self.declare_parameter('max_walls', 3)
         self.declare_parameter('ransac_threshold', 0.03)  # meters
         self.declare_parameter('min_inliers', 15)
-        self.declare_parameter('min_wall_length', 0.3)  # meters
+        self.declare_parameter('min_wall_length', 0.1)  # meters
         self.declare_parameter('angle_tolerance', 5.0)  # degrees
         self.declare_parameter('max_wall_distance', 1.0)  # meters
         
@@ -333,7 +333,7 @@ class lidar_processor(Node):
             )
             
             # Check for duplicates
-            if self._is_duplicate_wall(walls, slope, distance):
+            if self._is_duplicate_wall(walls, slope, distance, line_params):
                 remaining_x, remaining_y = remaining_x[~inlier_mask], remaining_y[~inlier_mask]
                 continue
             
@@ -442,9 +442,12 @@ class lidar_processor(Node):
         self,
         existing_walls: List[Dict],
         slope: float,
-        distance: float
+        distance: float,
+        line_params: Tuple[float, float, float] # <--- Added argument
     ) -> bool:
         """Check if wall is a duplicate of an existing wall."""
+        a1, b1, _ = line_params
+        
         for existing_wall in existing_walls:
             angle_diff = geom.normalize_angle_diff(slope, existing_wall['slope'], 'pi')
             is_parallel = geom.are_angles_parallel(
@@ -456,12 +459,15 @@ class lidar_processor(Node):
             if is_parallel:
                 dist_diff = abs(distance - existing_wall['distance'])
                 if dist_diff < self.DUPLICATE_DISTANCE_THRESHOLD:
-                    # self.get_logger().debug(
-                    #     f'Rejecting duplicate wall: slope={np.degrees(slope):.1f}° vs '
-                    #     f'{np.degrees(existing_wall["slope"]):.1f}°, '
-                    #     f'distance={distance:.3f}m vs {existing_wall["distance"]:.3f}m'
-                    # )
-                    return True
+                    # NEW CHECK: Check if normals point in the same direction
+                    # If dot product is positive, they are on the same side (Duplicate)
+                    # If dot product is negative, they are on opposite sides (Distinct)
+                    a2, b2, _ = existing_wall['line_params']
+                    dot_product = a1 * a2 + b1 * b2
+                    
+                    if dot_product > 0:
+                         # Same direction + Same distance = Duplicate
+                        return True
         
         return False
     

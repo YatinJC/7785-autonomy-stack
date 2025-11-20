@@ -35,6 +35,7 @@ class ControllerState(Enum):
     NAV_READING_SIGN = 8
     NAV_TURNING = 9
     NAV_DRIVING = 10
+    NAV_SEARCHING_WALL = 11
 
 
 class CellCenterController(Node):
@@ -269,7 +270,6 @@ class CellCenterController(Node):
         
         # 2. NAV_FACING_WALL: Rotate to face the wall
         if self.nav_state == ControllerState.NAV_FACING_WALL:
-            # (Existing logic remains the same)
             current_theta = self.cell_pos['theta_rad']
             cardinals = [0.0, math.pi/2, math.pi, -math.pi/2]
             target_theta = min(cardinals, key=lambda x: abs(geom.normalize_angle(x - current_theta)))
@@ -277,10 +277,42 @@ class CellCenterController(Node):
             
             if abs(error) < self.angle_tolerance:
                 self.publish_stop()
-                self.get_logger().info(f'Facing wall ({np.degrees(target_theta):.0f}°). Reading sign...')
-                self.nav_state = ControllerState.NAV_READING_SIGN
-                self.sign_buffer = []
+                
+                # CHECK: Is there actually a wall here?
+                if self._check_wall_in_front():
+                    self.get_logger().info(f'Facing wall ({np.degrees(target_theta):.0f}°). Reading sign...')
+                    self.nav_state = ControllerState.NAV_READING_SIGN
+                    self.sign_buffer = []
+                else:
+                    self.get_logger().info('Aligned to grid, but no wall. Starting 90° search turn...')
+                    self.nav_state = ControllerState.NAV_SEARCHING_WALL
+                    # Set target to 90 degrees LEFT of current orientation
+                    self.turn_target_yaw = geom.normalize_angle(self.current_yaw + math.pi/2)
             else:
+                # Standard rotation to face cardinal
+                angular_vel = self.kp_angular * error
+                angular_vel = self.clamp(angular_vel, -self.max_angular_vel, self.max_angular_vel)
+                self.publish_velocity(0.0, angular_vel)
+            return
+
+        # 2.5 NAV_SEARCHING_WALL: Turn 90 deg -> Check -> Repeat
+        if self.nav_state == ControllerState.NAV_SEARCHING_WALL:
+            # Reuse the turn_target_yaw we set in the previous state
+            error = geom.normalize_angle(self.turn_target_yaw - self.current_yaw)
+            
+            if abs(error) < self.angle_tolerance:
+                self.publish_stop()
+                
+                # 1. The turn is done. NOW we check for the wall.
+                if self._check_wall_in_front():
+                    self.get_logger().info('Search turn complete. Wall found! Aligning...')
+                    self.nav_state = ControllerState.NAV_FACING_WALL
+                else:
+                    self.get_logger().info('Search turn complete. No wall. turning another 90°...')
+                    # 2. No wall? Add another 90 degrees to the target and keep turning
+                    self.turn_target_yaw = geom.normalize_angle(self.turn_target_yaw + math.pi/2)
+            else:
+                # Standard P-Control for turning (reuse existing gains)
                 angular_vel = self.kp_angular * error
                 angular_vel = self.clamp(angular_vel, -self.max_angular_vel, self.max_angular_vel)
                 self.publish_velocity(0.0, angular_vel)
@@ -345,7 +377,7 @@ class CellCenterController(Node):
                 self.publish_velocity(0.0, angular_vel)
             return
         
-        # 5. NAV_DRIVING: Drive with lateral correction until blocked
+        # 5. NAV_DRIVING: Drive straight until blocked
         if self.nav_state == ControllerState.NAV_DRIVING:
             wall_in_front = self._check_wall_in_front()
             
@@ -355,38 +387,24 @@ class CellCenterController(Node):
                 self.nav_state = ControllerState.NAV_CENTERING
                 self.state = ControllerState.WAITING
             else:
-                # --- WALL FOLLOWING / LATERAL CORRECTION ---
-                # 1. Heading Correction
+                # SIMPLIFIED: Heading Control Only
+                # Just keep the robot pointing in the driving_direction.
+                # We ignore lateral (X/Y) error to prevent circling.
+                
                 self.target_theta = self.driving_direction
                 current_theta = self.cell_pos['theta_rad']
+                
+                # Calculate simple heading error
                 angular_error = geom.normalize_angle(self.target_theta - current_theta)
                 
-                # 2. Lateral Correction (Stay in middle of corridor)
-                center = self.cell_size / 2
-                lateral_error = 0.0
+                # Calculate control commands
+                # Note: We removed the lateral_cmd entirely
+                linear_vel = self.wall_follow_speed
+                angular_vel = self.kp_angular * angular_error
                 
-                # Check driving axis to determine which coordinate to correct
-                # If driving East/West (0 or 180), correct Y
-                if abs(self.driving_direction) < math.pi/4 or abs(self.driving_direction) > 3*math.pi/4:
-                    lateral_error = center - self.cell_pos['cell_y']
-                    # If driving West (180), flip error sign
-                    if abs(self.driving_direction) > math.pi/2:
-                        lateral_error = -lateral_error
-                # If driving North/South (90 or -90), correct X
-                else:
-                    lateral_error = center - self.cell_pos['cell_x']
-                    # If driving North (90), flip error sign
-                    if self.driving_direction > 0:
-                        lateral_error = -lateral_error
-
-                # 3. Combine and Drive
-                heading_cmd = self.kp_angular * angular_error
-                lateral_cmd = self.kp_lateral * lateral_error
-                
-                total_angular = heading_cmd + lateral_cmd
-                total_angular = self.clamp(total_angular, -self.max_angular_vel, self.max_angular_vel)
-                
-                self.publish_velocity(self.wall_follow_speed, total_angular)
+                # Clamp and publish
+                angular_vel = self.clamp(angular_vel, -self.max_angular_vel, self.max_angular_vel)
+                self.publish_velocity(linear_vel, 0)
             return
     
     # ========================================================================
@@ -601,7 +619,7 @@ class CellCenterController(Node):
         if not self.walls_data or self.walls_data['num_walls'] == 0:
             return False
         
-        stop_distance = 0.5  # Stop 0.5m from wall
+        stop_distance = 0.7  # Stop 0.7m from wall
         
         for wall in self.walls_data['walls']:
             dist = wall['distance_m']
