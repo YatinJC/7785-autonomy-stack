@@ -43,7 +43,18 @@ class CameraProcessor(Node):
 
         self.classes = ['empty', 'left', 'right', 'do_not_enter', 'stop', 'goal']
         self.model = self._load_model(model_path)
-        
+
+        if self.model is not None:
+            self.get_logger().info('Warming up neural network...')
+            try:
+                # Create a dummy input matching your sensor data (1 channel, 224x224)
+                dummy_input = torch.randn(1, 1, 224, 224).to(self.device)
+                with torch.no_grad():
+                    self.model(dummy_input)
+                self.get_logger().info('Warmup complete. Model is ready.')
+            except Exception as e:
+                self.get_logger().warn(f'Warmup failed: {e}')
+                
         # Transforms (MUST MATCH TRAINING)
         # 1. Resize to 224x224
         # 2. ToTensor (converts 0-255 to 0.0-1.0)
