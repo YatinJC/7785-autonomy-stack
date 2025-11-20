@@ -21,7 +21,8 @@ class CameraProcessor(Node):
         script_dir = os.path.dirname(os.path.abspath(__file__))
         default_model_path = os.path.join(script_dir, 'mobilenetv3_shape_classifier.pth')
         self.declare_parameter('model_path', default_model_path)
-        self.declare_parameter('camera_topic', '/simulated_camera/image_raw')
+        #self.declare_parameter('camera_topic', '/simulated_camera/image_raw') # sim camera
+        self.declare_parameter('camera_topic', '/image_raw/compressed') # real camera
         self.declare_parameter('use_compressed', False)
         
         model_path = self.get_parameter('model_path').value
@@ -66,6 +67,7 @@ class CameraProcessor(Node):
             
         # Publishers
         self.sign_pub = self.create_publisher(String, '/detected_sign', 10)
+        self.processed_feed_pub = self.create_publisher(CompressedImage, '/processed_feed/compressed', 10)
         
         self.get_logger().info('Camera processor initialized (MobileNetV3 + Canny)')
 
@@ -156,8 +158,13 @@ class CameraProcessor(Node):
         cv2.putText(combined_view, text, (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
-        cv2.imshow("RGB vs Saturation-Edges", combined_view)
-        cv2.waitKey(1)
+        # Publish compressed image
+        _, encoded_img = cv2.imencode('.jpg', combined_view)
+        compressed_msg = CompressedImage()
+        compressed_msg.header.stamp = self.get_clock().now().to_msg()
+        compressed_msg.format = "jpeg"
+        compressed_msg.data = encoded_img.tobytes()
+        self.processed_feed_pub.publish(compressed_msg)
 
 def main(args=None):
     rclpy.init(args=args)
@@ -169,7 +176,6 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
-        cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     main()
