@@ -120,6 +120,7 @@ class CellCenterController(Node):
         self.driving_direction = 0.0  # Direction we were driving before stopping (rad)
         self.facing_wall_reference_theta = None  # Saved orientation when entering NAV_FACING_WALL
         self.current_sign_future = None
+        self.wall_collision_sign_check = False
 
         # Subscribers
         self.cell_position_sub = self.create_subscription(
@@ -399,8 +400,21 @@ class CellCenterController(Node):
 
                     self.get_logger().info(f'Sign action: {winner}. Turning to {np.degrees(self.turn_target_yaw):.1f}°')
                 else:
-                    self.get_logger().warn('Saw EMPTY sign. Retrying...')
-                    self.sign_buffer = []
+                    # NEW LOGIC for "Empty" / "Unknown"
+                    if self.wall_collision_sign_check:
+                        self.get_logger().info('Wall is empty. Reverting to original behavior (Centering).')
+                        
+                        # Reset flag
+                        self.wall_collision_sign_check = False
+                        
+                        # Default behavior: Go to Centering (which triggers wall following)
+                        self.nav_state = ControllerState.NAV_CENTERING
+                        self.state = ControllerState.WAITING
+                        self.centering_start_theta = None
+                    else:
+                        # Standard behavior (at intersection): Retry
+                        self.get_logger().warn('Saw EMPTY sign. Retrying...')
+                        self.sign_buffer = []
                 return
 
             # C. If we need more votes and aren't waiting, send a new request
@@ -446,10 +460,15 @@ class CellCenterController(Node):
             
             if wall_in_front:
                 self.publish_stop()
-                self.get_logger().info('Wall detected in front. Centering...')
-                self.nav_state = ControllerState.NAV_CENTERING
-                self.state = ControllerState.WAITING
-                self.centering_start_theta = None  # Reset so it gets saved fresh
+                self.get_logger().info('Wall detected in front. Inspecting for sign...')
+                
+                # NEW LOGIC:
+                # 1. Set flag so we know this is an "impromptu" check
+                self.wall_collision_sign_check = True
+                
+                # 2. Use FACING_WALL state to align perfectly with the wall
+                self.nav_state = ControllerState.NAV_FACING_WALL
+                self.facing_wall_reference_theta = self.cell_pos['theta_rad']
             else:
                 # SIMPLIFIED: Heading Control Only
                 # Just keep the robot pointing in the driving_direction.
