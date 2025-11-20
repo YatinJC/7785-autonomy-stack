@@ -55,7 +55,7 @@ class CellCenterController(Node):
     
     # Control gains
     KP_LINEAR = 0.5               # Proportional gain for linear velocity
-    KP_ANGULAR = 1.0              # Proportional gain for angular velocity
+    KP_ANGULAR = 1.5              # Proportional gain for angular velocity
     KP_LATERAL = 0.3              # Gain for lateral correction (wall following)
     
     # Tolerances
