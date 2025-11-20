@@ -459,16 +459,23 @@ class CellCenterController(Node):
             wall_in_front = self._check_wall_in_front()
             
             if wall_in_front:
-                self.publish_stop()
-                self.get_logger().info('Wall detected in front. Inspecting for sign...')
-                
-                # NEW LOGIC:
-                # 1. Set flag so we know this is an "impromptu" check
-                self.wall_collision_sign_check = True
-                
-                # 2. Use FACING_WALL state to align perfectly with the wall
-                self.nav_state = ControllerState.NAV_FACING_WALL
-                self.facing_wall_reference_theta = self.cell_pos['theta_rad']
+                if self.walls_data and self.walls_data['num_walls'] == 1:
+                    self.publish_stop()
+                    self.get_logger().info('Wall detected in front. Inspecting for sign...')
+
+                    # NEW LOGIC:
+                    # 1. Set flag so we know this is an "impromptu" check
+                    self.wall_collision_sign_check = True
+
+                    # 2. Use FACING_WALL state to align perfectly with the wall
+                    self.nav_state = ControllerState.NAV_FACING_WALL
+                    self.facing_wall_reference_theta = self.cell_pos['theta_rad']
+                elif self.walls_data and self.walls_data['num_walls'] > 1:
+                    self.publish_stop()
+                    self.get_logger().info('Wall detected in front. Centering...')
+                    self.nav_state = ControllerState.NAV_CENTERING
+                    self.state = ControllerState.WAITING
+                    self.centering_start_theta = None  # Reset so it gets saved fresh
             else:
                 # SIMPLIFIED: Heading Control Only
                 # Just keep the robot pointing in the driving_direction.
