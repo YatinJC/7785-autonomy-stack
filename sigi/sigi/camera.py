@@ -128,7 +128,7 @@ class CameraProcessor(Node):
         saturation_channel = hsv[:, :, 1]
         
         # 3. Apply Canny Edge Detection to Saturation
-        edges = cv2.Canny(saturation_channel, 50, 200)
+        edges = cv2.Canny(saturation_channel, 100, 200)
         
         # 4. Convert to PIL and normalize
         pil_image = PILImage.fromarray(edges)
