@@ -362,7 +362,7 @@ class CellCenterController(Node):
 
                 # Wait for result (blocking but quick)
                 import rclpy
-                rclpy.spin_until_future_complete(self, future, timeout_sec=3.0)
+                rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
 
                 if future.done():
                     try:
