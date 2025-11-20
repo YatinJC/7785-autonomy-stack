@@ -29,6 +29,7 @@ setup(
             'lidar_processor = sigi.lidar:main',
             'controller = sigi.controller:main',
             'camera = sigi.camera:main',
+            'img_sub = sigi.img_sub:main',
         ],
     },
 )
