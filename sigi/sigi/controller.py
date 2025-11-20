@@ -109,6 +109,7 @@ class CellCenterController(Node):
         self.walls_data = None  # Detailed wall information
         self.last_position_time = None
         self.target_theta = 0.0  # For wall following and driving
+        self.centering_start_theta = None  # Saved orientation when entering NAV_CENTERING
         
         # Navigation State Variables
         self.current_sign = None
@@ -117,6 +118,7 @@ class CellCenterController(Node):
         self.turn_start_yaw = 0.0
         self.turn_target_yaw = 0.0
         self.driving_direction = 0.0  # Direction we were driving before stopping (rad)
+        self.facing_wall_reference_theta = None  # Saved orientation when entering NAV_FACING_WALL
         
         # Subscribers
         self.cell_position_sub = self.create_subscription(
@@ -267,9 +269,13 @@ class CellCenterController(Node):
         if self.cell_pos is None:
             self.publish_stop()
             return
-        
+
         # 1. NAV_CENTERING: Use localization logic to center in the cell
         if self.nav_state == ControllerState.NAV_CENTERING:
+            # Save orientation when first entering centering
+            if self.centering_start_theta is None:
+                self.centering_start_theta = self.cell_pos['theta_rad']
+                self.get_logger().info(f'Entering NAV_CENTERING, saved theta: {np.degrees(self.centering_start_theta):.1f}°')
             # (Existing logic remains the same)
             if has_full_localization:
                 if self.state not in [ControllerState.ROTATING, ControllerState.CENTERING, ControllerState.DONE]:
@@ -277,10 +283,14 @@ class CellCenterController(Node):
                 self.full_localization_control()
                 if self.state == ControllerState.DONE and self._is_centered():
                     self.publish_stop()
-                    self.get_logger().info('Centered in cell. Transitioning to FACING_WALL')
+                    self.get_logger().info(
+                        f'Centered in cell. Transitioning to FACING_WALL '
+                        f'(using saved theta: {np.degrees(self.centering_start_theta):.1f}°)'
+                    )
                     self.nav_state = ControllerState.NAV_FACING_WALL
                     self.state = ControllerState.WAITING
                     self.sign_buffer = []
+                    self.facing_wall_reference_theta = self.centering_start_theta
             else:
                 if self.state not in [ControllerState.ALIGNING, ControllerState.WALL_FOLLOWING]:
                     self.state = ControllerState.WAITING
@@ -289,9 +299,16 @@ class CellCenterController(Node):
         
         # 2. NAV_FACING_WALL: Rotate to face the wall
         if self.nav_state == ControllerState.NAV_FACING_WALL:
-            current_theta = self.cell_pos['theta_rad']
+            # Use the saved orientation from when we entered this state
+            if self.facing_wall_reference_theta is None:
+                self.facing_wall_reference_theta = self.cell_pos['theta_rad']
+
+            # Determine target cardinal based on reference orientation (only once)
             cardinals = [0.0, math.pi/2, math.pi, -math.pi/2]
-            target_theta = min(cardinals, key=lambda x: abs(geom.normalize_angle(x - current_theta)))
+            target_theta = min(cardinals, key=lambda x: abs(geom.normalize_angle(x - self.facing_wall_reference_theta)))
+
+            # Calculate error using current orientation for control
+            current_theta = self.cell_pos['theta_rad']
             error = geom.normalize_angle(target_theta - current_theta)
             
             if abs(error) < self.angle_tolerance:
@@ -326,6 +343,7 @@ class CellCenterController(Node):
                 if self._check_wall_in_front():
                     self.get_logger().info('Search turn complete. Wall found! Aligning...')
                     self.nav_state = ControllerState.NAV_FACING_WALL
+                    self.facing_wall_reference_theta = self.cell_pos['theta_rad']
                 else:
                     self.get_logger().info('Search turn complete. No wall. turning another 90°...')
                     # 2. No wall? Add another 90 degrees to the target and keep turning
@@ -384,6 +402,7 @@ class CellCenterController(Node):
                 if self._check_wall_in_front():
                     self.get_logger().info('Turn complete. Wall detected immediately in front. Looping to READ SIGN.')
                     self.nav_state = ControllerState.NAV_FACING_WALL
+                    self.facing_wall_reference_theta = self.cell_pos['theta_rad']
                 else:
                     self.get_logger().info('Turn complete. Path clear. Driving...')
                     self.nav_state = ControllerState.NAV_DRIVING
@@ -405,6 +424,7 @@ class CellCenterController(Node):
                 self.get_logger().info('Wall detected in front. Centering...')
                 self.nav_state = ControllerState.NAV_CENTERING
                 self.state = ControllerState.WAITING
+                self.centering_start_theta = None  # Reset so it gets saved fresh
             else:
                 # SIMPLIFIED: Heading Control Only
                 # Just keep the robot pointing in the driving_direction.

@@ -15,9 +15,12 @@ import os
 class CameraProcessor(Node):
     def __init__(self):
         super().__init__('camera_processor')
-        
+
         # Parameters
-        self.declare_parameter('model_path', './mobilenetv4_sign_classifier.pth')
+        # UPDATE: Point this to your new model file name
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        default_model_path = os.path.join(script_dir, 'mobilenetv3_shape_classifier.pth')
+        self.declare_parameter('model_path', default_model_path)
         self.declare_parameter('camera_topic', '/simulated_camera/image_raw')
         self.declare_parameter('use_compressed', False)
         
@@ -35,12 +38,14 @@ class CameraProcessor(Node):
         self.classes = ['empty', 'left', 'right', 'do_not_enter', 'stop', 'goal']
         self.model = self._load_model(model_path)
         
-        # Transforms (must match training)
+        # Transforms (MUST MATCH TRAINING)
+        # 1. Resize to 224x224
+        # 2. ToTensor (converts 0-255 to 0.0-1.0)
+        # 3. Normalize 1-channel input
         self.transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                               std=[0.229, 0.224, 0.225])
+            transforms.Normalize(mean=[0.5], std=[0.5]) 
         ])
         
         # Subscribers
@@ -62,28 +67,26 @@ class CameraProcessor(Node):
         # Publishers
         self.sign_pub = self.create_publisher(String, '/detected_sign', 10)
         
-        self.get_logger().info('Camera processor initialized')
+        self.get_logger().info('Camera processor initialized (MobileNetV3 + Canny)')
 
     def _load_model(self, model_path):
         try:
-            # Try creating MobileNetV4
-            try:
-                model = timm.create_model('mobilenetv4_conv_small.e2400_r224_in1k',
-                                        pretrained=False,
-                                        num_classes=6)
-            except:
-                # Fallback to other variants if needed
-                model = timm.create_model('mobilenetv3_large_100',
-                                        pretrained=False,
-                                        num_classes=6)
+            # Create MobileNetV3-Small with 1 input channel (for edges)
+            # This matches the 'mobilenetv3_small_100' from your training script
+            model = timm.create_model('mobilenetv3_small_100',
+                                    pretrained=False,
+                                    num_classes=6,
+                                    in_chans=1) # CRITICAL: 1 channel input
             
             if os.path.exists(model_path):
                 checkpoint = torch.load(model_path, map_location=self.device)
-                # Handle if state dict is nested
+                
+                # Handle state dict loading
                 if 'model_state_dict' in checkpoint:
                     model.load_state_dict(checkpoint['model_state_dict'])
                 else:
                     model.load_state_dict(checkpoint)
+                    
                 self.get_logger().info(f'Loaded model from {model_path}')
             else:
                 self.get_logger().warn(f'Model file not found at {model_path}! Predictions will be random.')
@@ -115,9 +118,18 @@ class CameraProcessor(Node):
         if self.model is None:
             return
             
-        # Preprocess
-        rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
-        pil_image = PILImage.fromarray(rgb_image)
+        # 1. Convert to HSV
+        hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+        
+        # 2. Extract Saturation Channel (Index 1)
+        # This separates "colorful things" (signs) from "dull things" (cardboard)
+        saturation_channel = hsv[:, :, 1]
+        
+        # 3. Apply Canny Edge Detection to Saturation
+        edges = cv2.Canny(saturation_channel, 50, 200)
+        
+        # 4. Convert to PIL and normalize
+        pil_image = PILImage.fromarray(edges)
         input_tensor = self.transform(pil_image).unsqueeze(0).to(self.device)
         
         # Inference
@@ -135,22 +147,29 @@ class CameraProcessor(Node):
         msg.data = class_name
         self.sign_pub.publish(msg)
         
-        # Visualization
-        display_img = cv_image.copy()
-        text = f"{class_name} ({confidence:.2f})"
-        cv2.putText(display_img, text, (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        # Visualization: Show the Saturation Edge Map
+        edge_display = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+        combined_view = np.hstack((cv_image, edge_display))
+        combined_view = cv2.resize(combined_view, (0,0), fx=0.5, fy=0.5)
         
-        cv2.imshow("Camera View", display_img)
+        text = f"Pred: {class_name} ({confidence:.2f})"
+        cv2.putText(combined_view, text, (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        cv2.imshow("RGB vs Saturation-Edges", combined_view)
         cv2.waitKey(1)
 
 def main(args=None):
     rclpy.init(args=args)
     node = CameraProcessor()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-    cv2.destroyAllWindows()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+        cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     main()

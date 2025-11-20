@@ -73,12 +73,21 @@ class SignDataset(Dataset):
 
     def __getitem__(self, idx):
         img_path = self.image_paths[idx]
-        image = Image.open(img_path).convert('RGB')
+        # Open as grayscale
+        image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        
+        # Apply Canny Edge Detection
+        # Thresholds (100, 200) may need tuning based on your lighting
+        edges = cv2.Canny(image, 100, 200)
+        
+        # Convert to PIL Image for transforms
+        # Model input will now be 1-channel, not 3-channel
+        image = Image.fromarray(edges) 
         label = self.labels[idx]
-
+        
         if self.transform:
             image = self.transform(image)
-
+        
         return image, label
 
 def load_data(labels_file, data_dir):
@@ -127,25 +136,7 @@ def get_transforms(train=True):
 
 def create_model(num_classes):
     """Create MobileNetV4 model with transfer learning"""
-    # Try to load MobileNetV4, fallback to MobileNetV3 if not available
-    try:
-        model = timm.create_model('mobilenetv4_conv_small.e2400_r224_in1k',
-                                  pretrained=True,
-                                  num_classes=num_classes)
-        print("Using MobileNetV4")
-    except:
-        try:
-            model = timm.create_model('mobilenetv4_hybrid_medium.e200_r256_in12k_ft_in1k',
-                                      pretrained=True,
-                                      num_classes=num_classes)
-            print("Using MobileNetV4 Hybrid")
-        except:
-            # Fallback to MobileNetV3
-            model = timm.create_model('mobilenetv3_large_100',
-                                      pretrained=True,
-                                      num_classes=num_classes)
-            print("Fallback to MobileNetV3 Large")
-
+    model = timm.create_model('mobilenetv3_small_100', pretrained=True, in_chans=1, num_classes=6)
     return model
 
 def train_epoch(model, dataloader, criterion, optimizer, device):

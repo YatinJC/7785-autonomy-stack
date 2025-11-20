@@ -33,7 +33,7 @@ class lidar_processor(Node):
     # Wall detection thresholds
     WALL_ALIGNMENT_THRESHOLD = 0.6          # Minimum dot product for wall identification (lowered from 0.7)
     SINGLE_WALL_ALIGNMENT_THRESHOLD = 0.5   # Lower threshold for single wall case
-    PARALLEL_ANGLE_THRESHOLD = 0.175        # ~10 degrees for parallel wall detection
+    PARALLEL_ANGLE_THRESHOLD = 0.35        # ~20 degrees for parallel wall detection
     DUPLICATE_DISTANCE_THRESHOLD = 0.2      # 20cm threshold for duplicate detection
     
     # Orientation estimation thresholds

@@ -14,6 +14,9 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
     ],
+    package_data={
+        package_name: ['*.pth'],
+    },
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='YC',
