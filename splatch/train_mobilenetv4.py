@@ -6,6 +6,7 @@ Training script for sign classification using MobileNetV4 with PyTorch
 import os
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
@@ -29,6 +30,36 @@ CONFIG = {
     'random_seed': 42,
     'device': 'cuda' if torch.cuda.is_available() else 'cpu'
 }
+
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for addressing class imbalance and hard examples.
+    Focuses training on hard misclassified examples.
+
+    FL(pt) = -α(1-pt)^γ * log(pt)
+
+    Args:
+        alpha: Weighting factor for class balance (default: 1.0)
+        gamma: Focusing parameter for hard examples (default: 2.0)
+        reduction: Specifies reduction to apply to output
+    """
+    def __init__(self, alpha=1.0, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss)  # pt is the probability of correct class
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
 
 class SignDataset(Dataset):
     """Custom dataset for sign images"""
@@ -75,11 +106,14 @@ def get_transforms(train=True):
     if train:
         return transforms.Compose([
             transforms.Resize((CONFIG['image_size'], CONFIG['image_size'])),
-            transforms.RandomHorizontalFlip(p=0.3),
-            transforms.RandomRotation(degrees=15),
-            transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3),
-            transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+            # Removed RandomHorizontalFlip to preserve left/right orientation
+            transforms.RandomRotation(degrees=8),  # Reduced from 15 to avoid confusing directional signs
+            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+            transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1)),
+            transforms.RandomPerspective(distortion_scale=0.2, p=0.3),  # Simulate different viewing angles
             transforms.ToTensor(),
+            transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),  # Add robustness to blur
+            transforms.RandomErasing(p=0.2, scale=(0.02, 0.15)),  # Handle partial occlusions
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                std=[0.229, 0.224, 0.225])
         ])
@@ -201,7 +235,7 @@ def main():
     model = model.to(CONFIG['device'])
 
     # Loss and optimizer
-    criterion = nn.CrossEntropyLoss()
+    criterion = FocalLoss(alpha=1.0, gamma=2.0)  # Using Focal Loss for better handling of hard examples
     optimizer = optim.Adam(model.parameters(), lr=CONFIG['learning_rate'])
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max',
                                                        factor=0.5, patience=5)

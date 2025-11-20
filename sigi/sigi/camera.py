@@ -17,7 +17,7 @@ class CameraProcessor(Node):
         super().__init__('camera_processor')
         
         # Parameters
-        self.declare_parameter('model_path', '/home/yc/turtlebot3_ws/src/7785-autonomy-stack/splatch/mobilenetv4_sign_classifier.pth')
+        self.declare_parameter('model_path', './mobilenetv4_sign_classifier.pth')
         self.declare_parameter('camera_topic', '/simulated_camera/image_raw')
         self.declare_parameter('use_compressed', False)
         

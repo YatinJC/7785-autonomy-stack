@@ -8,9 +8,11 @@ Supports two modes:
 """
 
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
 from typing import Tuple, List, Dict
 import json
 import math
@@ -98,7 +100,8 @@ class CellCenterController(Node):
         self.angle_tolerance = float(self.get_parameter('angle_tolerance').value)
         self.min_confidence = float(self.get_parameter('min_confidence').value)
         self.position_timeout = float(self.get_parameter('position_timeout').value)
-        
+        self.front_distance = float('inf')
+
         # State machines
         self.state = ControllerState.WAITING              # Low-level centering / wall-follow state
         self.nav_state = ControllerState.NAV_CENTERING    # High-level navigation state
@@ -142,6 +145,22 @@ class CellCenterController(Node):
             '/odom',
             self.odom_callback,
             10
+        )
+
+        # QoS profile for sensor data
+        sensor_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+        
+        # Subscriber
+        self.scan_sub = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.scan_callback,
+            sensor_qos
         )
         
         # Publisher
@@ -615,32 +634,45 @@ class CellCenterController(Node):
         return x_centered and y_centered
 
     def _check_wall_in_front(self) -> bool:
-        """Check if there is a wall directly in front of the robot."""
-        if not self.walls_data or self.walls_data['num_walls'] == 0:
-            return False
+        """
+        Check if there is a wall directly in front using raw LiDAR data.
+        Reliable and angle-invariant.
+        """
+        # Stop distance (0.7m from your previous code)
+        STOP_DISTANCE = 0.7 
         
-        stop_distance = 0.7  # Stop 0.7m from wall
-        
-        for wall in self.walls_data['walls']:
-            dist = wall['distance_m']
-            slope = wall['slope_rad']
-            current_theta = self.cell_pos['theta_rad']
-            angle_diff = abs(geom.normalize_angle(slope - current_theta))
-            is_perpendicular = abs(angle_diff - math.pi/2) < 0.3  # ~17 deg tolerance
+        # Check raw scan distance
+        if self.front_distance < STOP_DISTANCE:
+            return True
             
-            # Check if wall is actually IN FRONT (not behind)
-            is_front_facing = True
-            if 'normal' in wall:
-                # In robot frame, a front wall has a normal pointing roughly -x (backwards towards robot)
-                # A back wall has a normal pointing +x (forwards towards robot)
-                normal_x = wall['normal'][0]
-                if normal_x > -0.1:  # If normal x is positive or near zero, it's not a front wall
-                    is_front_facing = False
-            
-            if is_perpendicular and is_front_facing and dist < stop_distance:
-                return True
-        
         return False
+
+    def scan_callback(self, msg: LaserScan):
+        """Process raw LiDAR data for fast obstacle detection."""
+        ranges = np.array(msg.ranges)
+        
+        # Calculate angles for each range reading
+        angles = msg.angle_min + np.arange(len(ranges)) * msg.angle_increment
+        
+        # Define a cone in front of the robot (e.g., +/- 15 degrees)
+        # Adjust FOV based on your robot's width and environment
+        fov = np.radians(15) 
+        
+        # Create a mask for the front cone
+        # We use simple angle wrapping logic here or assume -pi to pi
+        # This logic works for standard -pi to pi scanners
+        front_mask = np.abs(angles) < fov
+        
+        # Filter out invalid readings (inf, nan, zeros)
+        valid_mask = np.isfinite(ranges) & (ranges > msg.range_min)
+        
+        # Combine masks
+        mask = front_mask & valid_mask
+        
+        if np.any(mask):
+            self.front_distance = np.min(ranges[mask])
+        else:
+            self.front_distance = float('inf')
 
     def publish_velocity(self, linear: float, angular: float):
         """Publish velocity command."""
