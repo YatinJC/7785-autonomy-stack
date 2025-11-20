@@ -250,6 +250,7 @@ class CellCenterController(Node):
         
         # 1. NAV_CENTERING: Use localization logic to center in the cell
         if self.nav_state == ControllerState.NAV_CENTERING:
+            # (Existing logic remains the same)
             if has_full_localization:
                 if self.state not in [ControllerState.ROTATING, ControllerState.CENTERING, ControllerState.DONE]:
                     self.state = ControllerState.WAITING
@@ -266,8 +267,9 @@ class CellCenterController(Node):
                 self.partial_localization_control()
             return
         
-        # 2. NAV_FACING_WALL: Rotate to face the wall that stopped us
+        # 2. NAV_FACING_WALL: Rotate to face the wall
         if self.nav_state == ControllerState.NAV_FACING_WALL:
+            # (Existing logic remains the same)
             current_theta = self.cell_pos['theta_rad']
             cardinals = [0.0, math.pi/2, math.pi, -math.pi/2]
             target_theta = min(cardinals, key=lambda x: abs(geom.normalize_angle(x - current_theta)))
@@ -286,6 +288,7 @@ class CellCenterController(Node):
         
         # 3. NAV_READING_SIGN: Collect votes
         if self.nav_state == ControllerState.NAV_READING_SIGN:
+            # (Existing logic remains the same)
             if self.current_sign:
                 self.sign_buffer.append(self.current_sign)
             
@@ -305,36 +308,44 @@ class CellCenterController(Node):
                     self.nav_state = ControllerState.NAV_TURNING
                     self.turn_start_yaw = self.current_yaw
                     
+                    # Determine turn target
                     if winner == 'left':
                         self.turn_target_yaw = geom.normalize_angle(self.current_yaw + math.pi/2)
-                        self.get_logger().info('Turning LEFT (90°)')
                     elif winner == 'right':
                         self.turn_target_yaw = geom.normalize_angle(self.current_yaw - math.pi/2)
-                        self.get_logger().info('Turning RIGHT (90°)')
                     else:
                         self.turn_target_yaw = geom.normalize_angle(self.current_yaw + math.pi)
-                        self.get_logger().info('Turning AROUND (180°)')
+                        
+                    self.get_logger().info(f'Sign action: {winner}. Turning to {np.degrees(self.turn_target_yaw):.1f}°')
                 else:
                     self.get_logger().warn('Saw EMPTY sign. Retrying...')
                     self.sign_buffer = []
             return
         
-        # 4. NAV_TURNING: Execute turn using odometry feedback
+        # 4. NAV_TURNING: Execute turn
         if self.nav_state == ControllerState.NAV_TURNING:
             error = geom.normalize_angle(self.turn_target_yaw - self.current_yaw)
             
             if abs(error) < self.angle_tolerance:
                 self.publish_stop()
-                self.get_logger().info('Turn complete. Driving to next wall...')
-                self.nav_state = ControllerState.NAV_DRIVING
-                self.driving_direction = self.turn_target_yaw
+                
+                # LOOP CHECK: Is there a wall immediately in front?
+                if self._check_wall_in_front():
+                    self.get_logger().info('Turn complete. Wall detected immediately in front. Looping to READ SIGN.')
+                    self.nav_state = ControllerState.NAV_FACING_WALL
+                else:
+                    self.get_logger().info('Turn complete. Path clear. Driving...')
+                    self.nav_state = ControllerState.NAV_DRIVING
+                    # Snap driving direction to nearest cardinal for cleaner math
+                    cardinals = [0.0, math.pi/2, math.pi, -math.pi/2]
+                    self.driving_direction = min(cardinals, key=lambda x: abs(geom.normalize_angle(x - self.turn_target_yaw)))
             else:
                 angular_vel = self.kp_angular * error
                 angular_vel = self.clamp(angular_vel, -self.max_angular_vel, self.max_angular_vel)
                 self.publish_velocity(0.0, angular_vel)
             return
         
-        # 5. NAV_DRIVING: Drive until wall detected
+        # 5. NAV_DRIVING: Drive with lateral correction until blocked
         if self.nav_state == ControllerState.NAV_DRIVING:
             wall_in_front = self._check_wall_in_front()
             
@@ -344,15 +355,38 @@ class CellCenterController(Node):
                 self.nav_state = ControllerState.NAV_CENTERING
                 self.state = ControllerState.WAITING
             else:
+                # --- WALL FOLLOWING / LATERAL CORRECTION ---
+                # 1. Heading Correction
                 self.target_theta = self.driving_direction
                 current_theta = self.cell_pos['theta_rad']
                 angular_error = geom.normalize_angle(self.target_theta - current_theta)
                 
-                linear_vel = self.wall_follow_speed
-                angular_vel = self.kp_angular * angular_error
-                angular_vel = self.clamp(angular_vel, -self.max_angular_vel, self.max_angular_vel)
+                # 2. Lateral Correction (Stay in middle of corridor)
+                center = self.cell_size / 2
+                lateral_error = 0.0
                 
-                self.publish_velocity(linear_vel, angular_vel)
+                # Check driving axis to determine which coordinate to correct
+                # If driving East/West (0 or 180), correct Y
+                if abs(self.driving_direction) < math.pi/4 or abs(self.driving_direction) > 3*math.pi/4:
+                    lateral_error = center - self.cell_pos['cell_y']
+                    # If driving West (180), flip error sign
+                    if abs(self.driving_direction) > math.pi/2:
+                        lateral_error = -lateral_error
+                # If driving North/South (90 or -90), correct X
+                else:
+                    lateral_error = center - self.cell_pos['cell_x']
+                    # If driving North (90), flip error sign
+                    if self.driving_direction > 0:
+                        lateral_error = -lateral_error
+
+                # 3. Combine and Drive
+                heading_cmd = self.kp_angular * angular_error
+                lateral_cmd = self.kp_lateral * lateral_error
+                
+                total_angular = heading_cmd + lateral_cmd
+                total_angular = self.clamp(total_angular, -self.max_angular_vel, self.max_angular_vel)
+                
+                self.publish_velocity(self.wall_follow_speed, total_angular)
             return
     
     # ========================================================================
@@ -536,11 +570,15 @@ class CellCenterController(Node):
         current_theta = self.cell_pos['theta_rad']
         
         if abs_slope < math.pi/4 or abs_slope > 3 * math.pi/4:
-            candidates = [math.pi/2, -math.pi/2]
-            corridor_type = "vertical corridor (horizontal walls)"
-        else:
+            # Wall is roughly horizontal (slope 0 or 180)
+            # We should drive PARALLEL to it (East/West)
             candidates = [-math.pi, 0.0, math.pi]
-            corridor_type = "horizontal corridor (vertical walls)"
+            corridor_type = "horizontal corridor (horizontal walls)"
+        else:
+            # Wall is roughly vertical (slope 90 or -90)
+            # We should drive PARALLEL to it (North/South)
+            candidates = [math.pi/2, -math.pi/2]
+            corridor_type = "vertical corridor (vertical walls)"
         
         target_theta = min(candidates, key=lambda x: abs(geom.normalize_angle(x - current_theta)))
         return corridor_type, target_theta
@@ -571,7 +609,17 @@ class CellCenterController(Node):
             current_theta = self.cell_pos['theta_rad']
             angle_diff = abs(geom.normalize_angle(slope - current_theta))
             is_perpendicular = abs(angle_diff - math.pi/2) < 0.3  # ~17 deg tolerance
-            if is_perpendicular and dist < stop_distance:
+            
+            # Check if wall is actually IN FRONT (not behind)
+            is_front_facing = True
+            if 'normal' in wall:
+                # In robot frame, a front wall has a normal pointing roughly -x (backwards towards robot)
+                # A back wall has a normal pointing +x (forwards towards robot)
+                normal_x = wall['normal'][0]
+                if normal_x > -0.1:  # If normal x is positive or near zero, it's not a front wall
+                    is_front_facing = False
+            
+            if is_perpendicular and is_front_facing and dist < stop_distance:
                 return True
         
         return False

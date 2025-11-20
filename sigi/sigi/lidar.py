@@ -823,21 +823,24 @@ class lidar_processor(Node):
         }
         
         for i, wall in enumerate(walls):
+            # Extract normal vector (a, b) from line_params
+            normal_a = float(wall['line_params'][0])
+            normal_b = float(wall['line_params'][1])
+            
             wall_info = {
                 'id': i,
                 'slope_rad': float(wall['slope']),
                 'slope_deg': float(np.degrees(wall['slope'])),
                 'distance_m': float(wall['distance']),
                 'length_m': float(wall['length']),
-                'inliers': int(wall['inliers'])
+                'inliers': int(wall['inliers']),
+                'normal': [normal_a, normal_b]  # <--- ADD THIS LINE
             }
             walls_data['walls'].append(wall_info)
         
         msg = String()
         msg.data = json.dumps(walls_data)
         self.walls_pub.publish(msg)
-        
-        # self.get_logger().info(f'Detected {len(walls)} walls')
     
     def publish_cell_position(self, cell_pos: Dict):
         """Publish cell position estimate."""
